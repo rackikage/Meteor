@@ -25,13 +25,16 @@ def bootstrap(config_path: Path = CONFIG_PATH) -> BootstrapResult:
         raise FileNotFoundError(f"Config not found: {config_path}")
 
     config = MeteorConfig.load(config_path)
+    runtime_base_dir = config_path.resolve(strict=False).parent
 
     default_profile_name = config.models.default_profile
     default_profile = config.models.profiles.get(default_profile_name)
     if default_profile is None:
         raise ValueError(f"Default model profile '{default_profile_name}' not found in config.")
 
-    model_path = REPO_ROOT / default_profile.model_path
+    model_path = Path(default_profile.model_path)
+    if not model_path.is_absolute():
+        model_path = (runtime_base_dir / model_path).resolve(strict=False)
     if not model_path.exists():
         warnings.append(f"Model file not found: {model_path}. Runtime will not be able to execute inference.")
 

@@ -27,8 +27,28 @@ def test_bootstrap_model_path_is_resolved() -> None:
     assert result.default_model_path.suffix == ".gguf"
 
 
+def test_bootstrap_uses_supplied_config_base_dir(tmp_path) -> None:
+    import yaml
+
+    config_path = tmp_path / "meteor.yaml"
+    model_path = tmp_path / "llama3.2-3b.gguf"
+
+    base_config_path = Path(__file__).resolve().parent.parent / "config" / "meteor.yaml"
+    with open(base_config_path) as f:
+        raw = yaml.safe_load(f)
+
+    with open(config_path, "w") as f:
+        yaml.safe_dump(raw, f)
+
+    model_path.write_text("placeholder")
+
+    result = bootstrap(config_path)
+    assert result.default_model_path == model_path
+    assert result.ready is True
+    assert not any("/Users/Aboogie/Meteor/llama3.2-3b.gguf" in w for w in result.warnings)
+
+
 def test_bootstrap_warning_if_gguf_missing(tmp_path) -> None:
-    import shutil
     import yaml
 
     config_dir = tmp_path / "config"

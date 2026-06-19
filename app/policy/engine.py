@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.config import MeteorConfig, PolicyAllowRule
 from app.policy.contract import PolicyAction, PolicyDecision, PolicyRequest, PolicySubject
 
@@ -31,8 +33,16 @@ class PolicyEngine:
             return False
 
         if rule.paths:
-            path = request.context.get("path", "")
-            return any(path.startswith(p) for p in rule.paths)
+            requested_path = request.context.get("path")
+            if not requested_path:
+                return False
+
+            resolved_request_path = Path(requested_path).resolve(strict=False)
+            for allowed_root in rule.paths:
+                resolved_root = Path(allowed_root).resolve(strict=False)
+                if resolved_request_path == resolved_root or resolved_request_path.is_relative_to(resolved_root):
+                    return True
+            return False
 
         return True
 

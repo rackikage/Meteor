@@ -62,6 +62,30 @@ def test_policy_denies_filesystem_read_on_disallowed_path() -> None:
     assert decision.action == PolicyAction.DENY
 
 
+def test_policy_denies_filesystem_traversal_from_config_root() -> None:
+    engine = _engine()
+    decision = engine.evaluate(
+        PolicyRequest(
+            subject=PolicySubject.FILESYSTEM,
+            action="read",
+            context={"path": "./config/../../etc/passwd"},
+        )
+    )
+    assert decision.action == PolicyAction.DENY
+
+
+def test_policy_denies_filesystem_traversal_from_data_root() -> None:
+    engine = _engine()
+    decision = engine.evaluate(
+        PolicyRequest(
+            subject=PolicySubject.FILESYSTEM,
+            action="read",
+            context={"path": "./data/../../secret.txt"},
+        )
+    )
+    assert decision.action == PolicyAction.DENY
+
+
 def test_policy_decision_is_audited() -> None:
     engine = _engine()
     decision = engine.evaluate(
