@@ -1,0 +1,49 @@
+app:
+  name: Meteor
+  version: "0.1.0"
+  local_first: true
+  debug: false
+
+models:
+  default_profile: llama3.2-3b-local
+  profiles:
+    llama3.2-3b-local:
+      backend: llama_cpp
+      model_path: "llama3.2-3b.gguf"
+      context_window: 4096
+      temperature: 0.7
+      max_tokens: 512
+      wired: false
+
+policy:
+  default_action: deny
+  allow_rules:
+    - subject: runtime
+      action: invoke
+    - subject: filesystem
+      action: read
+      paths:
+        - "./config"
+        - "./data"
+    - subject: index
+      action: read
+
+memory:
+  backend: sqlite
+  path: "./data/memory.db"
+
+retrieval:
+  backend: none
+  index_path: "./data/index"
+
+storage:
+  backend: sqlite
+  paths:
+    memory: "./data/memory.db"
+    audit: "./data/audit.db"
+    index_meta: "./data/index_meta.db"
+
+observability:
+  log_level: INFO
+  audit_enabled: true
+  health_checks_enabled: true
