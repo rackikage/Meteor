@@ -18,6 +18,13 @@ class BootstrapResult:
     warnings: list[str]
 
 
+def _derive_repo_root(config_path: Path) -> Path:
+    resolved_config_path = config_path.resolve(strict=False)
+    if resolved_config_path.parent.name == "config":
+        return resolved_config_path.parent.parent
+    return resolved_config_path.parent
+
+
 def bootstrap(config_path: Path = CONFIG_PATH) -> BootstrapResult:
     warnings: list[str] = []
 
@@ -25,7 +32,7 @@ def bootstrap(config_path: Path = CONFIG_PATH) -> BootstrapResult:
         raise FileNotFoundError(f"Config not found: {config_path}")
 
     config = MeteorConfig.load(config_path)
-    runtime_base_dir = config_path.resolve(strict=False).parent
+    repo_root = _derive_repo_root(config_path)
 
     default_profile_name = config.models.default_profile
     default_profile = config.models.profiles.get(default_profile_name)
@@ -34,7 +41,7 @@ def bootstrap(config_path: Path = CONFIG_PATH) -> BootstrapResult:
 
     model_path = Path(default_profile.model_path)
     if not model_path.is_absolute():
-        model_path = (runtime_base_dir / model_path).resolve(strict=False)
+        model_path = (repo_root / model_path).resolve(strict=False)
     if not model_path.exists():
         warnings.append(f"Model file not found: {model_path}. Runtime will not be able to execute inference.")
 
@@ -42,7 +49,7 @@ def bootstrap(config_path: Path = CONFIG_PATH) -> BootstrapResult:
 
     return BootstrapResult(
         config=config,
-        repo_root=REPO_ROOT,
+        repo_root=repo_root,
         default_model_path=model_path,
         ready=ready,
         warnings=warnings,

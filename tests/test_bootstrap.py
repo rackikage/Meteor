@@ -30,7 +30,9 @@ def test_bootstrap_model_path_is_resolved() -> None:
 def test_bootstrap_uses_supplied_config_base_dir(tmp_path) -> None:
     import yaml
 
-    config_path = tmp_path / "meteor.yaml"
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_path = config_dir / "meteor.yaml"
     model_path = tmp_path / "llama3.2-3b.gguf"
 
     base_config_path = Path(__file__).resolve().parent.parent / "config" / "meteor.yaml"
@@ -44,6 +46,7 @@ def test_bootstrap_uses_supplied_config_base_dir(tmp_path) -> None:
 
     result = bootstrap(config_path)
     assert result.default_model_path == model_path
+    assert result.repo_root == tmp_path
     assert result.ready is True
     assert not any("/Users/Aboogie/Meteor/llama3.2-3b.gguf" in w for w in result.warnings)
 
