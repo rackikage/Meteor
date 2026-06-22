@@ -3,12 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.config import MeteorConfig, PolicyAllowRule
-from app.policy.contract import PolicyAction, PolicyDecision, PolicyRequest, PolicySubject
+from app.policy.contract import PolicyAction, PolicyDecision, PolicyRequest
 
 
 class PolicyEngine:
-    def __init__(self, config: MeteorConfig) -> None:
+    def __init__(self, config: MeteorConfig, repo_root: Path | None = None) -> None:
         self._config = config
+        self._repo_root = repo_root.resolve(strict=False) if repo_root else Path.cwd().resolve(strict=False)
 
     def evaluate(self, request: PolicyRequest) -> PolicyDecision:
         for rule in self._config.policy.allow_rules:
@@ -37,15 +38,21 @@ class PolicyEngine:
             if not requested_path:
                 return False
 
-            resolved_request_path = Path(requested_path).resolve(strict=False)
+            resolved_request_path = self._resolve_policy_path(str(requested_path))
             for allowed_root in rule.paths:
-                resolved_root = Path(allowed_root).resolve(strict=False)
+                resolved_root = self._resolve_policy_path(allowed_root)
                 if resolved_request_path == resolved_root or resolved_request_path.is_relative_to(resolved_root):
                     return True
             return False
 
         return True
 
+    def _resolve_policy_path(self, path_value: str) -> Path:
+        path = Path(path_value)
+        if path.is_absolute():
+            return path.resolve(strict=False)
+        return (self._repo_root / path).resolve(strict=False)
 
-def build_policy_engine(config: MeteorConfig) -> PolicyEngine:
-    return PolicyEngine(config)
+
+def build_policy_engine(config: MeteorConfig, repo_root: Path | None = None) -> PolicyEngine:
+    return PolicyEngine(config, repo_root=repo_root)
