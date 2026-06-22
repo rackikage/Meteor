@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from app.config import MeteorConfig
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "meteor.yaml"
@@ -41,3 +39,8 @@ def test_config_model_profile_has_required_fields() -> None:
     assert profile.model_path.endswith(".gguf")
     assert isinstance(profile.context_window, int)
     assert profile.wired is False
+
+
+def test_config_has_model_allow_rule() -> None:
+    config = MeteorConfig.load(CONFIG_PATH)
+    assert any(rule.subject == "model" and rule.action == "execute" for rule in config.policy.allow_rules)

@@ -20,6 +20,12 @@ policy:
   allow_rules:
     - subject: runtime
       action: invoke
+    - subject: model
+      action: execute
+    - subject: memory
+      action: read
+    - subject: memory
+      action: write
     - subject: filesystem
       action: read
       paths:

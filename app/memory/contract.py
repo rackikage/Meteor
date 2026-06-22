@@ -26,7 +26,7 @@ class MemoryAdapter:
     def write(self, entry: MemoryEntry) -> None:
         raise NotImplementedError
 
-    def read(self, session_id: str, memory_type: MemoryType) -> list[MemoryEntry]:
+    def read(self, session_id: str, memory_type: MemoryType, limit: int = 20) -> list[MemoryEntry]:
         raise NotImplementedError
 
     def health(self) -> dict:

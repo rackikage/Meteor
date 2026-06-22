@@ -6,7 +6,29 @@
 
 Meteor is a local-first AI runtime. It receives intent, applies policy, builds context, selects adapters, and returns structured results. The runtime owns the workflow. Everything else is a plugin.
 
-The model is not the product. The GGUF file in this repo is a local artifact for development. It is not the architecture. Swap it for any compatible model without changing the runtime.
+The model is not the product. The GGUF file in this repo is a local artifact for development. Swap it for any compatible model without changing the runtime.
+
+## Current runtime state
+
+The first runnable slice is now wired:
+
+1. Runtime request enters the orchestrator.
+2. Policy authorizes every runtime, retrieval, memory, and model step.
+3. Memory uses a local SQLite adapter.
+4. Retrieval uses a replaceable null adapter until indexing exists.
+5. Context builder assembles the model payload.
+6. Model execution goes through a replaceable adapter. The default adapter is deliberately disabled because the configured GGUF profile has `wired: false`.
+7. Evidence and audit metadata are attached to the response.
+
+This means the workflow runs end-to-end without pretending that model inference is ready.
+
+## Local commands
+
+```bash
+python3 -m pytest -q
+python3 -m app.main health
+python3 -m app.main run "summarize project status"
+```
 
 ## Why local-first
 
@@ -31,10 +53,6 @@ See [docs/doctrine.md](docs/doctrine.md) for the full engineering law.
 
 See [docs/architecture.md](docs/architecture.md) for the full layer definitions, text diagram, and forbidden coupling rules.
 
-## Status
-
-Foundation phase. Runtime skeleton and typed contracts exist. Model inference is not yet wired. The API contract layer is in progress on a separate branch.
-
 ## Local model artifact
 
-The file `llama3.2-3b.gguf` in the repo root is a local development artifact. It is not loaded, executed, or referenced by runtime code in this phase. It will be consumed by the model adapter layer only after that layer is implemented and policy-approved.
+The file `llama3.2-3b.gguf` in the repo root is a local development artifact. It is consumed only through the model adapter layer after that profile is deliberately wired and policy-approved.

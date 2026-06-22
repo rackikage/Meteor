@@ -25,6 +25,13 @@ def _derive_repo_root(config_path: Path) -> Path:
     return resolved_config_path.parent
 
 
+def resolve_repo_path(repo_root: Path, configured_path: str) -> Path:
+    path = Path(configured_path)
+    if path.is_absolute():
+        return path.resolve(strict=False)
+    return (repo_root / path).resolve(strict=False)
+
+
 def bootstrap(config_path: Path = CONFIG_PATH) -> BootstrapResult:
     warnings: list[str] = []
 
@@ -39,11 +46,9 @@ def bootstrap(config_path: Path = CONFIG_PATH) -> BootstrapResult:
     if default_profile is None:
         raise ValueError(f"Default model profile '{default_profile_name}' not found in config.")
 
-    model_path = Path(default_profile.model_path)
-    if not model_path.is_absolute():
-        model_path = (repo_root / model_path).resolve(strict=False)
+    model_path = resolve_repo_path(repo_root, default_profile.model_path)
     if not model_path.exists():
-        warnings.append(f"Model file not found: {model_path}. Runtime will not be able to execute inference.")
+        warnings.append(f"Model file not found: {model_path}. Model execution will run disabled.")
 
     ready = len(warnings) == 0
 

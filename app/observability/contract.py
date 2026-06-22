@@ -33,7 +33,7 @@ class HealthCheckResult:
 class ObservabilityAdapter:
     """Abstract interface. All observability backends must implement this contract."""
 
-    def log(self, level: LogLevel, message: str, metadata: dict = None) -> None:
+    def log(self, level: LogLevel, message: str, metadata: dict | None = None) -> None:
         raise NotImplementedError
 
     def audit(self, entry: AuditEntry) -> None:

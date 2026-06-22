@@ -7,17 +7,26 @@ from app.policy.contract import PolicyAction, PolicyRequest, PolicySubject
 from app.policy.engine import build_policy_engine
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "meteor.yaml"
+REPO_ROOT = CONFIG_PATH.parent.parent
 
 
 def _engine():
     config = MeteorConfig.load(CONFIG_PATH)
-    return build_policy_engine(config)
+    return build_policy_engine(config, repo_root=REPO_ROOT)
 
 
 def test_policy_allows_runtime_invoke() -> None:
     engine = _engine()
     decision = engine.evaluate(
         PolicyRequest(subject=PolicySubject.RUNTIME, action="invoke", context={})
+    )
+    assert decision.action == PolicyAction.ALLOW
+
+
+def test_policy_allows_model_execute() -> None:
+    engine = _engine()
+    decision = engine.evaluate(
+        PolicyRequest(subject=PolicySubject.MODEL, action="execute", context={})
     )
     assert decision.action == PolicyAction.ALLOW
 
@@ -33,7 +42,7 @@ def test_policy_denies_unknown_subject() -> None:
 def test_policy_denies_by_default() -> None:
     engine = _engine()
     decision = engine.evaluate(
-        PolicyRequest(subject=PolicySubject.MODEL, action="execute", context={})
+        PolicyRequest(subject=PolicySubject.TOOL, action="execute", context={})
     )
     assert decision.action == PolicyAction.DENY
 
