@@ -9,6 +9,10 @@ description = "Local-first AI runtime. The runtime is the product."
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=4.9",
+    "playwright>=1.40",
 ]
 
 [project.optional-dependencies]

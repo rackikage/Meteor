@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 
@@ -17,14 +18,17 @@ class MigrationRecord:
     applied_at: str
 
 
-class StorageAdapter:
+class StorageAdapter(ABC):
     """Abstract interface. All storage backends must implement this contract."""
 
+    @abstractmethod
     def execute(self, sql: str, params: tuple = ()) -> list[dict]:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def migrate(self) -> list[MigrationRecord]:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def health(self) -> dict:
-        raise NotImplementedError
+        ...

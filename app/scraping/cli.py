@@ -18,7 +18,7 @@ from typing import Optional
 
 from .browser_adapter import BrowserAdapter
 from .condenser import DOMCondenser
-from .contracts import ScrapePolicy, ScrapeTarget
+from .contracts import Evidence, ScrapePolicy, ScrapeTarget
 from .llm_adapter import LLMAdapter
 from .orchestrator import ScrapingOrchestrator
 from .policy import PolicyEngine
@@ -180,3 +180,7 @@ def cli() -> None:
         asyncio.run(_cmd_list(args))
     elif args.command == "view":
         asyncio.run(_cmd_view(args))
+
+
+if __name__ == "__main__":
+    cli()

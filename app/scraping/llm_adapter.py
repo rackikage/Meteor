@@ -79,7 +79,13 @@ class LLMAdapter:
     def _get_client(self):
         """Lazy import Ollama to avoid startup dependency on the binary."""
         if self._client is None:
-            import ollama
+            try:
+                import ollama
+            except ImportError:
+                raise ImportError(
+                    "ollama package is required for LLM adapter. "
+                    "Install with: pip install ollama"
+                )
             self._client = ollama
         return self._client
 
@@ -186,4 +192,6 @@ class LLMAdapter:
                 if v:
                     parts.append(f"{k}={v}")
             lines.append(f"  {i}. {', '.join(parts)}")
+        if len(items) > 20:
+            lines.append(f"  ... and {len(items) - 20} more")
         return "\n".join(lines)

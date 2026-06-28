@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from app.bootstrap import bootstrap
 from app.policy.contract import PolicyAction, PolicyRequest, PolicySubject
-from app.policy.engine import build_policy_engine
+from app.policy.engine import PolicyEngine, build_policy_engine
 from app.runtime.contract import RuntimeRequest, RuntimeResponse, RuntimeStatus
 
 
 class RuntimeOrchestrator:
-    def __init__(self, policy_engine) -> None:
+    def __init__(self, policy_engine: PolicyEngine) -> None:
         self._policy = policy_engine
 
     def handle(self, request: RuntimeRequest) -> RuntimeResponse:

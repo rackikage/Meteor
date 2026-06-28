@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 
@@ -25,14 +26,17 @@ class RetrievalResult:
     metadata: dict = field(default_factory=dict)
 
 
-class RetrievalAdapter:
+class RetrievalAdapter(ABC):
     """Abstract interface. All retrieval backends must implement this contract."""
 
+    @abstractmethod
     def query(self, query: RetrievalQuery) -> RetrievalResult:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def index(self, documents: list[dict]) -> None:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def health(self) -> dict:
-        raise NotImplementedError
+        ...

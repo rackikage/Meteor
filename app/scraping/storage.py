@@ -32,11 +32,10 @@ class EvidenceStore:
     def save(self, evidence: Evidence) -> Path:
         """Persist evidence to a timestamped JSON file.  Returns the file path."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = (
-            evidence.target.url
-            .replace("://", "_")
-            .replace("/", "_")[:80]
-        )
+        safe_name = "".join(
+            c if c.isalnum() or c in "._-" else "_"
+            for c in evidence.target.url
+        )[:80]
         filename = f"{timestamp}__{safe_name}.json"
         filepath = self.storage_dir / filename
 

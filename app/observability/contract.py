@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Optional
 
 
 class LogLevel(str, Enum):
@@ -33,7 +34,7 @@ class HealthCheckResult:
 class ObservabilityAdapter:
     """Abstract interface. All observability backends must implement this contract."""
 
-    def log(self, level: LogLevel, message: str, metadata: dict = None) -> None:
+    def log(self, level: LogLevel, message: str, metadata: Optional[dict] = None) -> None:
         raise NotImplementedError
 
     def audit(self, entry: AuditEntry) -> None:

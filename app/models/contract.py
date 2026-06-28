@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Iterator
 
@@ -21,14 +22,17 @@ class ModelOutput:
     metadata: dict = field(default_factory=dict)
 
 
-class ModelAdapter:
+class ModelAdapter(ABC):
     """Abstract interface. All model adapters must implement this contract."""
 
+    @abstractmethod
     def complete(self, input: ModelInput) -> ModelOutput:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def stream(self, input: ModelInput) -> Iterator[str]:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def health(self) -> dict:
-        raise NotImplementedError
+        ...

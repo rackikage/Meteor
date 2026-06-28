@@ -66,15 +66,16 @@ try {
     };
 } catch(e) {}
 
-// Canvas fingerprint noise — add subtle noise to toDataURL/toBlob
+// Canvas fingerprint noise — add dimension-seeded noise
 try {
     const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
     HTMLCanvasElement.prototype.toDataURL = function(...args) {
         const ctx = this.getContext('2d');
         if (ctx) {
-            const imageData = ctx.getImageData(0, 0, this.width, this.height);
+            const seed = (this.width * 31 + this.height) & 0xFF;
+            const imageData = ctx.getImageData(0, 0, Math.min(this.width, 16), Math.min(this.height, 16));
             if (imageData && imageData.data.length > 0) {
-                imageData.data[0] = imageData.data[0] ^ 1;
+                imageData.data[0] = imageData.data[0] ^ seed;
             }
             ctx.putImageData(imageData, 0, 0);
         }
@@ -110,7 +111,6 @@ class BrowserAdapter:
                 "--no-sandbox",
                 "--disable-blink-features=AutomationControlled",
                 "--disable-features=IsolateOrigins,site-per-process",
-                "--disable-web-security",
                 "--disable-dev-shm-usage",
             ],
         )

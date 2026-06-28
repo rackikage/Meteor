@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -73,7 +74,7 @@ class ScrapingOrchestrator:
         Returns an Evidence container holding every extracted insight, every
         navigation log entry, and the final session status.
         """
-        session_id = target.url[:60]
+        session_id = uuid.uuid4().hex[:12]
         evidence = Evidence(
             session_id=session_id,
             target=target,
@@ -255,4 +256,10 @@ class ScrapingOrchestrator:
             *[_wrapped(t) for t in targets],
             return_exceptions=True,
         )
-        return results  # type: ignore[return-value]
+        evidence_results: list[Evidence] = []
+        for r in results:
+            if isinstance(r, Exception):
+                logger.error("Batch task failed: %s", r)
+            else:
+                evidence_results.append(r)
+        return evidence_results

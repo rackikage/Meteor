@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -20,14 +21,17 @@ class MemoryEntry:
     metadata: dict = field(default_factory=dict)
 
 
-class MemoryAdapter:
+class MemoryAdapter(ABC):
     """Abstract interface. All memory backends must implement this contract."""
 
+    @abstractmethod
     def write(self, entry: MemoryEntry) -> None:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def read(self, session_id: str, memory_type: MemoryType) -> list[MemoryEntry]:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def health(self) -> dict:
-        raise NotImplementedError
+        ...

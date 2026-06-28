@@ -23,6 +23,10 @@ class PolicyEngine:
 
     def __init__(self, policy: Optional[ScrapePolicy] = None) -> None:
         self.policy = policy or ScrapePolicy()
+        if self.policy.respect_robots_txt:
+            logger.warning(
+                "respect_robots_txt is enabled but robots.txt enforcement is not yet implemented"
+            )
 
     def validate_target(self, target: ScrapeTarget) -> tuple[bool, Optional[str]]:
         """Validate a scrape target against policy.  Returns (allowed, reason)."""
@@ -49,10 +53,24 @@ class PolicyEngine:
 
         return True, None
 
-    def validate_navigation(self, nav_action: str, _target_url: str) -> tuple[bool, Optional[str]]:
+    def validate_navigation(self, nav_action: str, target_url: str) -> tuple[bool, Optional[str]]:
         """Validate a navigation action before execution."""
         if self.policy.block_captcha and "captcha" in nav_action.lower():
             return False, "CAPTCHA detected — blocking action per policy"
+
+        if target_url:
+            parsed = urlparse(target_url)
+            domain = parsed.netloc.lower()
+            if domain in self.policy.blocked_domains:
+                return False, f"Domain {domain} is blocked by policy"
+            if self.policy.allowed_domains:
+                allowed = any(
+                    domain == d or domain.endswith(f".{d}")
+                    for d in self.policy.allowed_domains
+                )
+                if not allowed:
+                    return False, f"Domain {domain} not in allowed list"
+
         return True, None
 
     def rate_limit_delay(self, pages_visited: int) -> float:

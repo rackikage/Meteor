@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -26,12 +27,14 @@ class ToolOutput:
     metadata: dict = field(default_factory=dict)
 
 
-class ToolAdapter:
+class ToolAdapter(ABC):
     """Abstract interface. All tool implementations must implement this contract."""
     access_level: ToolAccessLevel = ToolAccessLevel.READ_ONLY
 
+    @abstractmethod
     def execute(self, input: ToolInput) -> ToolOutput:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def health(self) -> dict:
-        raise NotImplementedError
+        ...
