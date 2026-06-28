@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -31,14 +32,17 @@ class HealthCheckResult:
     metadata: dict = field(default_factory=dict)
 
 
-class ObservabilityAdapter:
+class ObservabilityAdapter(ABC):
     """Abstract interface. All observability backends must implement this contract."""
 
+    @abstractmethod
     def log(self, level: LogLevel, message: str, metadata: Optional[dict] = None) -> None:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def audit(self, entry: AuditEntry) -> None:
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def health(self) -> HealthCheckResult:
-        raise NotImplementedError
+        ...

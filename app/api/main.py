@@ -1,0 +1,182 @@
+"""Meteor API — FastAPI application.
+
+This is the main entry point for the HTTP API. It wires together all v1
+endpoints and provides dependency injection for the runtime.
+"""
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Optional
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.v1.endpoints import chat, health, hyper_search, memory, retrieval
+from app.bootstrap import bootstrap
+from app.memory.sqlite_adapter import build_sqlite_memory_adapter
+from app.memory.triggers import install_memory_triggers
+from app.models.registry import build_model_registry
+from app.observability.sqlite_adapter import build_sqlite_observability_adapter
+from app.policy.sql_engine import build_sql_policy_engine
+from app.retrieval.sqlite_adapter import build_sqlite_retrieval_adapter
+from app.search.orchestrator import HyperSearchOrchestrator
+from app.storage.sqlite_adapter import build_sqlite_adapter
+
+logger = logging.getLogger(__name__)
+
+
+class MeteorRuntime:
+    """Runtime container — holds all initialized adapters."""
+
+    def __init__(self) -> None:
+        self.config = None
+        self.repo_root = None
+        self.storage = None
+        self.model_registry = None
+        self.memory = None
+        self.retrieval = None
+        self.observability = None
+        self.policy = None
+
+    def initialize(self) -> None:
+        """Initialize all runtime components."""
+        result = bootstrap()
+        self.config = result.config
+        self.repo_root = result.repo_root
+
+        self.storage = build_sqlite_adapter(self.config.storage, self.repo_root)
+        self.model_registry = build_model_registry(self.config.models, self.repo_root)
+        self.memory = build_sqlite_memory_adapter(self.storage)
+        self.retrieval = build_sqlite_retrieval_adapter(self.storage)
+        self.policy = build_sql_policy_engine(self.storage)
+        self.observability = build_sqlite_observability_adapter(
+            self.storage,
+            log_level=self.config.observability.log_level,
+            audit_enabled=self.config.observability.audit_enabled,
+        )
+
+        install_memory_triggers(self.storage)
+
+        self.observability.register_health_check("model", self.model_registry.health)
+        self.observability.register_health_check("memory", self.memory.health)
+        self.observability.register_health_check("retrieval", self.retrieval.health)
+        self.observability.register_health_check("storage", self.storage.health)
+
+        hyper_orchestrator = HyperSearchOrchestrator(retrieval_adapter=self.retrieval)
+        hyper_search.init_hyper_search(hyper_orchestrator)
+
+        logger.info("Meteor runtime initialized")
+
+    def handle_chat(
+        self,
+        prompt: str,
+        session_id: str,
+        max_tokens: int,
+        temperature: float,
+        metadata: dict,
+    ) -> dict:
+        """Handle a chat completion request."""
+        from app.models.contract import ModelInput
+
+        adapter = self.model_registry.get_adapter()
+        model_input = ModelInput(
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            metadata=metadata,
+        )
+
+        result = adapter.complete(model_input)
+
+        return {
+            "response_text": result.response_text,
+            "finish_reason": result.finish_reason,
+            "token_usage": result.token_usage,
+            "metadata": result.metadata,
+        }
+
+    def handle_chat_stream(
+        self,
+        prompt: str,
+        session_id: str,
+        max_tokens: int,
+        temperature: float,
+        metadata: dict,
+    ):
+        """Handle a streaming chat completion request."""
+        from app.models.contract import ModelInput
+
+        adapter = self.model_registry.get_adapter()
+        model_input = ModelInput(
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            metadata=metadata,
+        )
+
+        for token in adapter.stream(model_input):
+            yield token
+
+    def shutdown(self) -> None:
+        """Shutdown all runtime components."""
+        if self.storage:
+            self.storage.close()
+        logger.info("Meteor runtime shut down")
+
+
+_runtime: Optional[MeteorRuntime] = None
+
+
+def get_runtime() -> MeteorRuntime:
+    """Get the global runtime instance."""
+    global _runtime
+    if _runtime is None:
+        _runtime = MeteorRuntime()
+        _runtime.initialize()
+    return _runtime
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan — initialize on startup, shutdown on exit."""
+    get_runtime()
+    yield
+    if _runtime:
+        _runtime.shutdown()
+
+
+app = FastAPI(
+    title="Meteor API",
+    description="Local-first AI runtime — the runtime is the product",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(health.router, prefix="/api/v1")
+app.include_router(chat.router, prefix="/api/v1")
+app.include_router(memory.router, prefix="/api/v1")
+app.include_router(retrieval.router, prefix="/api/v1")
+app.include_router(hyper_search.router, prefix="/api/v1")
+
+
+@app.get("/")
+async def root():
+    """Root endpoint — API info."""
+    return {
+        "name": "Meteor API",
+        "version": "1.0.0",
+        "description": "Local-first AI runtime",
+        "docs": "/docs",
+        "health": "/api/v1/health",
+    }

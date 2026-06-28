@@ -13,7 +13,7 @@ models:
       context_window: 4096
       temperature: 0.7
       max_tokens: 512
-      wired: false
+      wired: true
 
 policy:
   default_action: deny

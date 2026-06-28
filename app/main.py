@@ -22,8 +22,13 @@ def cmd_health() -> None:
 
 
 def cmd_serve() -> None:
-    print("API server not yet wired. See feat/api-contracts-and-health-runtime-entrypoints-v1.")
-    sys.exit(1)
+    import uvicorn
+    from app.api.main import app
+
+    print("Starting Meteor API server...")
+    print("API docs: http://localhost:8000/docs")
+    print("Health check: http://localhost:8000/api/v1/health")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 def main() -> None:

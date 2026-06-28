@@ -40,4 +40,4 @@ def test_config_model_profile_has_required_fields() -> None:
     assert profile.backend == "llama_cpp"
     assert profile.model_path.endswith(".gguf")
     assert isinstance(profile.context_window, int)
-    assert profile.wired is False
+    assert profile.wired is True
