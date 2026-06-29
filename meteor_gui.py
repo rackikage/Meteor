@@ -10,7 +10,7 @@ import threading
 import json
 import asyncio
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ── Paths ─────────────────────────────────────────────────────────────
 REPO = Path(__file__).resolve().parent
@@ -71,7 +71,7 @@ class MeteorChat:
         self.root.geometry("820x620")
         self.root.minsize(600, 450)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.session_id = f"silk-{datetime.utcnow().timestamp():.0f}"
+        self.session_id = f"silk-{datetime.now(timezone.utc).timestamp():.0f}"
         self.chat_history: list[dict] = []
         self.tool_log: list[str] = []
 
