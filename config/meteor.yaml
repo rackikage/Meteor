@@ -5,8 +5,15 @@ app:
   debug: false
 
 models:
-  default_profile: llama3.2-3b-local
+  default_profile: ollama-local
   profiles:
+    ollama-local:
+      backend: ollama
+      model_path: "llama3.2"
+      context_window: 4096
+      temperature: 0.7
+      max_tokens: 512
+      wired: true
     llama3.2-3b-local:
       backend: llama_cpp
       model_path: "llama3.2-3b.gguf"
