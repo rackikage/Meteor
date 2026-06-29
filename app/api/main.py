@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.endpoints import chat, health, hyper_search, memory, retrieval
+from app.agent.loop import MeteorAgent
 from app.bootstrap import bootstrap
 from app.dispatcher.grinder import InfiltrationGrinder
 from app.dispatcher.noise import NoiseFloorSampler
@@ -50,6 +51,7 @@ class MeteorRuntime:
         self.noise = None
         self.grinder = None
         self.graph_tool = None
+        self.agent = None
 
     def initialize(self) -> None:
         """Initialize all runtime components."""
@@ -82,6 +84,12 @@ class MeteorRuntime:
         )
 
         self.graph_tool = GraphQueryTool(self.graph)
+
+        self.agent = MeteorAgent(
+            graph=self.graph,
+            event_bus=self.event_bus,
+            grinder=self.grinder,
+        )
 
         self.observability.register_health_check("model", self.model_registry.health)
         self.observability.register_health_check("memory", self.memory.health)

@@ -8,15 +8,13 @@ import tkinter as tk
 from tkinter import ttk, font
 import threading
 import json
-import time
-import requests
+import asyncio
 from pathlib import Path
 from datetime import datetime
 
 # ── Paths ─────────────────────────────────────────────────────────────
 REPO = Path(__file__).resolve().parent
 ICON_PATH = REPO / "assets" / "meteor_icon_64.png"
-API_BASE = "http://localhost:8000"
 
 # ── Palette ───────────────────────────────────────────────────────────
 BLACK       = "#000000"
@@ -37,6 +35,18 @@ RED         = "#FF5252"
 MODEL_NAME  = "Meteor"
 FONT_FAMILY = "Helvetica"
 MSG_MAX_LEN = 80  # chars per line for word wrap
+
+HELP_TEXT = """═══ Meteor Commands ═══
+scan <ip>          — scan a host for open ports
+infiltrate <ip/subnet> depth <N>  — full infiltration
+research <service/banner> — web search for CVEs & exploits
+graph              — show asset graph state
+pivot <ip>         — find paths from a host
+stats              — show runtime statistics
+help               — show this message
+/clear             — clear chat
+
+Any other text → infiltrate the first word as target"""
 
 # ── Resolve font ───────────────────────────────────────────────────────
 def _resolve_font(root: tk.Tk) -> str:
@@ -81,10 +91,7 @@ class MeteorChat:
         self._bind_keys()
 
         # Welcome message
-        self._add_message("Meteor", (
-            "Meteor runtime ready. I can scan networks, query the graph, "
-            "and execute tools. What would you like to do?"
-        ))
+        self._add_message("Meteor", HELP_TEXT)
 
     # ── Styles ──────────────────────────────────────────────────────
     def _build_styles(self) -> None:
@@ -211,16 +218,196 @@ class MeteorChat:
             return
         self._input.delete(0, "end")
 
-        if text.lower() in ("/clear", "/reset"):
+        if text.lower() == "/clear":
             self._clear_chat()
             return
 
         self._add_message("user", text)
-        self.chat_history.append({"role": "user", "content": text})
-        self._set_status("thinking", AMBER)
-        self._dot.itemconfig(1, fill=AMBER)
 
-        threading.Thread(target=self._call_api, args=(text,), daemon=True).start()
+        # Parse command
+        cmd, args = self._parse(text)
+        target = threading.Thread(target=self._dispatch, args=(cmd, args), daemon=True)
+        target.start()
+
+    def _parse(self, text: str) -> tuple[str, dict]:
+        """Parse user input into command + arguments."""
+        t = text.lower().strip()
+        parts = t.split()
+
+        if t.startswith("infiltrate") or t.startswith("inf"):
+            target = parts[1] if len(parts) > 1 else "127.0.0.1"
+            depth = 1
+            for i, p in enumerate(parts):
+                if p == "depth" and i + 1 < len(parts):
+                    try: depth = int(parts[i + 1]); break
+                    except: pass
+            return ("infiltrate", {"target": target, "depth": depth})
+
+        if t.startswith("scan"):
+            target = parts[1] if len(parts) > 1 else "127.0.0.1"
+            return ("scan", {"target": target})
+
+        if t.startswith("research") or t.startswith("res"):
+            return ("research", {"service": " ".join(parts[1:]) if len(parts) > 1 else "ssh"})
+
+        if t.startswith("graph") or t.startswith("gr"):
+            return ("graph", {})
+
+        if t.startswith("pivot"):
+            ip = parts[1] if len(parts) > 1 else "127.0.0.1"
+            return ("pivot", {"ip": ip})
+
+        if t.startswith("stats"):
+            return ("stats", {})
+
+        if t.startswith("help"):
+            return ("help", {})
+
+        # Default: treat as free-text → agent infiltrate
+        return ("infiltrate", {"target": text.split()[0] if " " in text else text, "depth": 1})
+
+    def _dispatch(self, cmd: str, args: dict) -> None:
+        """Execute command via the Meteor runtime."""
+        try:
+            from app.api.main import get_runtime
+            r = get_runtime()
+
+            if cmd == "scan":
+                self._do_scan(r, args)
+            elif cmd == "infiltrate":
+                self._do_infiltrate(r, args)
+            elif cmd == "research":
+                self._do_research(r, args)
+            elif cmd == "graph":
+                self._do_graph(r)
+            elif cmd == "pivot":
+                self._do_pivot(r, args)
+            elif cmd == "stats":
+                self._do_stats(r)
+            elif cmd == "help":
+                self.root.after(0, self._add_message, "Meteor", HELP_TEXT)
+            else:
+                self.root.after(0, self._add_message, "Meteor",
+                    f"Unknown command: {cmd}. Type 'help' for commands.")
+        except Exception as e:
+            self.root.after(0, self._set_status, "error", RED)
+            self.root.after(0, self._add_message, "Meteor", f"[ERROR]: {e}")
+
+    def _do_scan(self, r, args: dict) -> None:
+        self.root.after(0, self._set_status, "scanning", AMBER)
+        self.root.after(0, lambda: self._dot.itemconfig(1, fill=AMBER))
+        target = args["target"]
+        s = asyncio.run(r.grinder.grind_host(target, ports=[22,80,443,445,3389,8080,8443]))
+        self.root.after(0, self._add_message, "Meteor",
+            f"✓ Scanned {target}\n"
+            f"  Open ports: {s.services_discovered}\n"
+            f"  Time: {s.wall_time_ms:.0f}ms\n"
+            f"  Errors: {s.errors}")
+        self.root.after(0, self._set_status, "idle", DIM_SILVER)
+        self.root.after(0, lambda: self._dot.itemconfig(1, fill=GREEN))
+
+    def _do_infiltrate(self, r, args: dict) -> None:
+        target = args["target"]
+        depth = args["depth"]
+        self.root.after(0, self._set_status, f"infiltrating {target} (depth {depth})", AMBER)
+        self.root.after(0, lambda: self._dot.itemconfig(1, fill=AMBER))
+
+        report = asyncio.run(r.agent.infiltrate(target, depth=depth))
+
+        msg = (
+            f"═══ Infiltration Report ═══\n"
+            f"Target: {report.target}\n"
+            f"Depth reached: {report.depth_reached}\n"
+            f"Hosts discovered: {report.hosts_discovered}\n"
+            f"Services: {report.services_discovered}\n"
+            f"Critical vulns: {report.critical_vulns}\n"
+            f"High vulns: {report.high_vulns}\n"
+            f"Exploits found: {report.exploits_found}\n"
+            f"Time: {report.wall_time_ms:.0f}ms"
+        )
+        self.root.after(0, self._add_message, "Meteor", msg)
+
+        # Show top intel
+        if report.intelligence:
+            top = sorted(report.intelligence, key=lambda x: x.attack_surface_score, reverse=True)[:5]
+            lines = ["\n═══ Top Attack Surface ═══"]
+            for i, intel in enumerate(top, 1):
+                lines.append(f"{i}. {intel.ip}:{intel.port}/{intel.service} — {intel.attack_surface_score:.1f}/10")
+                for cve in intel.cves[:2]:
+                    lines.append(f"   {cve.cve_id} ({cve.severity}) {'[EXPLOIT]' if cve.exploit_available else ''}")
+            self.root.after(0, self._add_message, "Meteor", "\n".join(lines))
+
+        self.root.after(0, self._set_status, "idle", DIM_SILVER)
+        self.root.after(0, lambda: self._dot.itemconfig(1, fill=GREEN))
+
+    def _do_research(self, r, args: dict) -> None:
+        from app.agent.web_search import WebSearcher
+        query = args["service"]
+        self.root.after(0, self._set_status, f"researching {query}", AMBER)
+        searcher = WebSearcher()
+        intel = asyncio.run(searcher.research_service("target", 0, query))
+
+        lines = [f"═══ Research: {query} ═══"]
+        for cve in intel.cves[:5]:
+            lines.append(f"  {cve.cve_id} ({cve.severity}/{cve.cvss_score})")
+            if cve.exploit_available:
+                lines.append(f"    → exploit available")
+        for ex in intel.exploits[:3]:
+            lines.append(f"  [EXPLOIT] {ex.title}")
+        for hit in intel.search_hits[:3]:
+            lines.append(f"  [DOC] {hit.title}")
+        lines.append(f"  Attack surface: {intel.attack_surface_score:.1f}/10")
+        self.root.after(0, self._add_message, "Meteor", "\n".join(lines))
+        self.root.after(0, self._set_status, "idle", DIM_SILVER)
+        self.root.after(0, lambda: self._dot.itemconfig(1, fill=GREEN))
+
+    def _do_graph(self, r) -> None:
+        stats = r.graph_tool.stats()
+        hosts = r.graph_tool.query("SELECT ip, hostname, source FROM hosts LIMIT 10")
+        services = r.graph_tool.query("SELECT COUNT(*) as n FROM services")
+        edges = r.graph_tool.query("SELECT edge_type, COUNT(*) as n FROM asset_edges GROUP BY edge_type")
+
+        lines = [f"═══ Asset Graph ═══",
+                 f"Tables: {len(r.graph_tool.tables())}"]
+        for t, c in stats.items():
+            if c > 0:
+                lines.append(f"  {t}: {c} rows")
+        lines.append(f"\nHosts ({len(hosts.rows)}):")
+        for h in hosts.rows:
+            lines.append(f"  {h['ip']} ({h.get('hostname','?')}) [{h.get('source','?')}]")
+        lines.append(f"\nEdges:")
+        for e in edges.rows:
+            lines.append(f"  {e['edge_type']}: {e['n']}")
+        self.root.after(0, self._add_message, "Meteor", "\n".join(lines))
+        self.root.after(0, self._set_status, "idle", DIM_SILVER)
+
+    def _do_pivot(self, r, args: dict) -> None:
+        ip = args["ip"]
+        hosts = r.graph_tool.query(f"SELECT id FROM hosts WHERE ip = '{ip}'")
+        if not hosts.rows:
+            self.root.after(0, self._add_message, "Meteor", f"Host {ip} not found in graph. Scan it first.")
+            return
+        hid = hosts.rows[0]["id"]
+        neighbors = r.graph.find_neighbors("host", hid)
+        lines = [f"═══ Pivots from {ip} ═══"]
+        for n in neighbors[:10]:
+            lines.append(f"  → {n['neighbor_type']}:{n['neighbor_id']} [{n['edge_type']}] (weight: {n['weight']})")
+        if not neighbors:
+            lines.append("  No edges found.")
+        self.root.after(0, self._add_message, "Meteor", "\n".join(lines))
+        self.root.after(0, self._set_status, "idle", DIM_SILVER)
+
+    def _do_stats(self, r) -> None:
+        bus = r.event_bus.stats()
+        noise = r.noise.get_state()
+        lines = [
+            f"═══ Runtime Stats ═══",
+            f"EventBus: {bus['events_published']} events, {bus['events_dropped']} dropped, {bus['subscriber_count']} subscribers",
+            f"Noise: {noise.camouflage_multiplier}x, idle={noise.is_host_idle}",
+            f"Workers: {r.noise.worker_count()}",
+        ]
+        self.root.after(0, self._add_message, "Meteor", "\n".join(lines))
+        self.root.after(0, self._set_status, "idle", DIM_SILVER)
 
     def _add_message(self, sender: str, text: str) -> None:
         is_user = sender == "user"
@@ -273,51 +460,6 @@ class MeteorChat:
         self._add_message("silk-o2", "Chat cleared. What's next?")
 
     # ── API call ────────────────────────────────────────────────────
-    def _call_api(self, prompt: str) -> None:
-        try:
-            resp = requests.post(f"{API_BASE}/api/v1/chat", json={
-                "prompt": prompt,
-                "session_id": self.session_id,
-                "max_tokens": 512,
-                "temperature": 0.7,
-                "stream": False,
-                "metadata": {"source": "silk-o2-gui"},
-            }, timeout=30)
-
-            if resp.status_code == 200:
-                data = resp.json()
-                reply = data.get("response_text", "")
-                usage = data.get("token_usage", {})
-
-                # Show tool calls if present in metadata
-                tools = data.get("metadata", {}).get("tools_used", [])
-                for t in tools:
-                    self.root.after(0, self._add_tool_entry,
-                                    t.get("name", "tool"),
-                                    t.get("status", "ok"),
-                                    t.get("detail", ""))
-
-                self.chat_history.append({"role": "assistant", "content": reply})
-                self.root.after(0, self._add_message, "silk-o2", reply)
-                self.root.after(0, self._set_status,
-                                f"{usage.get('total_tokens', 0)} tokens used", DIM_SILVER)
-                self.root.after(0, lambda: self._dot.itemconfig(1, fill=GREEN))
-            else:
-                err = resp.json().get("detail", resp.text)
-                self.root.after(0, self._add_message, "silk-o2", f"API error: {err}")
-                self.root.after(0, self._set_status, "error", RED)
-                self.root.after(0, lambda: self._dot.itemconfig(1, fill=RED))
-
-        except requests.ConnectionError:
-            self.root.after(0, self._add_message, "silk-o2",
-                            "Cannot reach local API. Is the server running?")
-            self.root.after(0, self._set_status, "offline", RED)
-            self.root.after(0, lambda: self._dot.itemconfig(1, fill=RED))
-        except Exception as e:
-            self.root.after(0, self._add_message, "silk-o2", f"Error: {e}")
-            self.root.after(0, self._set_status, "error", RED)
-            self.root.after(0, lambda: self._dot.itemconfig(1, fill=RED))
-
     # ── Close ───────────────────────────────────────────────────────
     def _on_close(self) -> None:
         self.root.destroy()
