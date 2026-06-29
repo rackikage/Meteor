@@ -375,6 +375,113 @@ class SQLiteAdapter(StorageAdapter):
                     );
                     """,
                 ),
+                (
+                    4,
+                    "create_system_tools_tables",
+                    """
+                    CREATE TABLE IF NOT EXISTS filesystem_audit (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        operation TEXT NOT NULL,
+                        path TEXT NOT NULL,
+                        size INTEGER,
+                        duration_ms REAL,
+                        status TEXT DEFAULT 'ok',
+                        timestamp TEXT NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_fs_audit_path
+                        ON filesystem_audit(path);
+
+                    CREATE INDEX IF NOT EXISTS idx_fs_audit_op
+                        ON filesystem_audit(operation);
+
+                    CREATE TABLE IF NOT EXISTS shell_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        command TEXT NOT NULL,
+                        returncode INTEGER,
+                        stdout_preview TEXT,
+                        stderr_preview TEXT,
+                        duration_ms REAL,
+                        work_dir TEXT,
+                        timed_out INTEGER DEFAULT 0,
+                        timestamp TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS process_snapshots (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        pid INTEGER NOT NULL,
+                        name TEXT,
+                        cpu_percent REAL,
+                        memory_mb REAL,
+                        threads INTEGER,
+                        timestamp TEXT NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_proc_snap_pid
+                        ON process_snapshots(pid);
+
+                    CREATE INDEX IF NOT EXISTS idx_proc_snap_ts
+                        ON process_snapshots(timestamp);
+
+                    CREATE TABLE IF NOT EXISTS notification_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        urgency TEXT DEFAULT 'normal',
+                        delivered INTEGER DEFAULT 1,
+                        timestamp TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                        name TEXT PRIMARY KEY,
+                        command TEXT NOT NULL,
+                        schedule TEXT NOT NULL,
+                        enabled INTEGER DEFAULT 1,
+                        last_run TEXT,
+                        last_status TEXT,
+                        run_count INTEGER DEFAULT 0,
+                        created_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS ipc_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        source TEXT,
+                        target TEXT,
+                        action TEXT NOT NULL,
+                        payload TEXT,
+                        response_status TEXT,
+                        duration_ms REAL,
+                        timestamp TEXT NOT NULL
+                    );
+                    """,
+                ),
+                (
+                    5,
+                    "create_system_policies",
+                    """
+                    CREATE TABLE IF NOT EXISTS system_policies (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        tool TEXT NOT NULL,
+                        operation TEXT NOT NULL,
+                        path_pattern TEXT,
+                        action_gate TEXT NOT NULL DEFAULT 'deny',
+                        priority INTEGER DEFAULT 0
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_system_policies_lookup
+                        ON system_policies(tool, operation);
+
+                    INSERT OR IGNORE INTO system_policies
+                        (tool, operation, path_pattern, action_gate, priority)
+                    VALUES
+                        ('filesystem', 'remove_tree', '/', 'deny', 100),
+                        ('filesystem', 'write_file', '/etc/*', 'deny', 90),
+                        ('filesystem', 'write_file', '/sys/*', 'deny', 90),
+                        ('filesystem', 'write_file', '/proc/*', 'deny', 90),
+                        ('filesystem', 'read_file', '*/.ssh/id_*', 'deny', 80),
+                        ('filesystem', 'read_file', '*/.meteor/keychain*', 'deny', 80);
+                    """,
+                ),
             ]
 
         elif store_name == "index_meta":
