@@ -482,6 +482,128 @@ class SQLiteAdapter(StorageAdapter):
                         ('filesystem', 'read_file', '*/.meteor/keychain*', 'deny', 80);
                     """,
                 ),
+                (
+                    6,
+                    "create_asset_graph_tables",
+                    """
+                    CREATE TABLE IF NOT EXISTS hosts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ip TEXT NOT NULL UNIQUE,
+                        hostname TEXT,
+                        os TEXT,
+                        subnet_id INTEGER,
+                        state TEXT DEFAULT 'up',
+                        source TEXT,
+                        first_seen TEXT NOT NULL,
+                        last_seen TEXT NOT NULL,
+                        confidence REAL DEFAULT 1.0,
+                        attrs_json TEXT DEFAULT '{}'
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_hosts_subnet ON hosts(subnet_id);
+                    CREATE INDEX IF NOT EXISTS idx_hosts_state ON hosts(state);
+
+                    CREATE TABLE IF NOT EXISTS subnets (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        cidr TEXT NOT NULL UNIQUE,
+                        parent_id INTEGER REFERENCES subnets(id),
+                        scope_session TEXT,
+                        first_seen TEXT NOT NULL,
+                        last_seen TEXT NOT NULL,
+                        attrs_json TEXT DEFAULT '{}'
+                    );
+
+                    CREATE TABLE IF NOT EXISTS services (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        host_id INTEGER NOT NULL REFERENCES hosts(id),
+                        port INTEGER NOT NULL,
+                        proto TEXT DEFAULT 'tcp',
+                        name TEXT,
+                        banner TEXT,
+                        state TEXT DEFAULT 'open',
+                        first_seen TEXT NOT NULL,
+                        last_seen TEXT NOT NULL,
+                        attrs_json TEXT DEFAULT '{}',
+                        UNIQUE(host_id, port, proto)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_services_host ON services(host_id);
+
+                    CREATE TABLE IF NOT EXISTS credentials (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        host_id INTEGER REFERENCES hosts(id),
+                        username TEXT NOT NULL,
+                        secret_type TEXT NOT NULL,
+                        secret_value TEXT,
+                        source TEXT,
+                        verified INTEGER DEFAULT 0,
+                        discovered_at TEXT NOT NULL,
+                        last_used TEXT,
+                        attrs_json TEXT DEFAULT '{}',
+                        UNIQUE(host_id, username, secret_type)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        domain TEXT,
+                        source TEXT,
+                        first_seen TEXT NOT NULL,
+                        last_seen TEXT NOT NULL,
+                        attrs_json TEXT DEFAULT '{}',
+                        UNIQUE(name, domain)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS shares (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        host_id INTEGER NOT NULL REFERENCES hosts(id),
+                        name TEXT NOT NULL,
+                        share_type TEXT,
+                        permissions TEXT,
+                        first_seen TEXT NOT NULL,
+                        last_seen TEXT NOT NULL,
+                        UNIQUE(host_id, name, share_type)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS vulnerabilities (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        service_id INTEGER REFERENCES services(id),
+                        cve_id TEXT,
+                        severity TEXT,
+                        description TEXT,
+                        exploit_available INTEGER DEFAULT 0,
+                        discovered_at TEXT NOT NULL,
+                        attrs_json TEXT DEFAULT '{}'
+                    );
+
+                    CREATE TABLE IF NOT EXISTS asset_edges (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        source_type TEXT NOT NULL,
+                        source_id INTEGER NOT NULL,
+                        target_type TEXT NOT NULL,
+                        target_id INTEGER NOT NULL,
+                        edge_type TEXT NOT NULL,
+                        weight REAL DEFAULT 1.0,
+                        confidence REAL DEFAULT 1.0,
+                        first_seen TEXT NOT NULL,
+                        last_seen TEXT NOT NULL,
+                        attrs_json TEXT DEFAULT '{}',
+                        UNIQUE(source_type, source_id, target_type, target_id, edge_type)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_edges_source ON asset_edges(source_type, source_id);
+                    CREATE INDEX IF NOT EXISTS idx_edges_target ON asset_edges(target_type, target_id);
+                    CREATE INDEX IF NOT EXISTS idx_edges_type ON asset_edges(edge_type);
+
+                    CREATE TABLE IF NOT EXISTS asset_observations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        asset_type TEXT NOT NULL,
+                        asset_id INTEGER NOT NULL,
+                        source TEXT,
+                        observed_at TEXT NOT NULL,
+                        attrs_json TEXT DEFAULT '{}'
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_observations_asset ON asset_observations(asset_type, asset_id);
+                    CREATE INDEX IF NOT EXISTS idx_observations_time ON asset_observations(observed_at);
+                    """,
+                ),
             ]
 
         elif store_name == "index_meta":
@@ -587,7 +709,7 @@ class SQLiteAdapter(StorageAdapter):
         conn = self._connections[store]
         cursor = conn.execute(sql, params)
 
-        if sql.strip().upper().startswith(("SELECT", "PRAGMA")):
+        if sql.strip().upper().startswith(("SELECT", "PRAGMA", "WITH", "EXPLAIN")):
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
         else:

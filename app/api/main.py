@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.endpoints import chat, health, hyper_search, memory, retrieval
 from app.bootstrap import bootstrap
+from app.graph.event_bus import AssetEventBus
+from app.graph.sqlite_graph import SQLiteAssetGraph
 from app.memory.sqlite_adapter import build_sqlite_memory_adapter
 from app.memory.triggers import install_memory_triggers
 from app.models.registry import build_model_registry
@@ -40,6 +42,8 @@ class MeteorRuntime:
         self.retrieval = None
         self.observability = None
         self.policy = None
+        self.graph = None
+        self.event_bus = None
 
     def initialize(self) -> None:
         """Initialize all runtime components."""
@@ -60,6 +64,11 @@ class MeteorRuntime:
 
         install_memory_triggers(self.storage)
 
+        self.event_bus = AssetEventBus()
+        self.graph = SQLiteAssetGraph(self.storage)
+
+        self._wire_graph_subscribers()
+
         self.observability.register_health_check("model", self.model_registry.health)
         self.observability.register_health_check("memory", self.memory.health)
         self.observability.register_health_check("retrieval", self.retrieval.health)
@@ -69,6 +78,60 @@ class MeteorRuntime:
         hyper_search.init_hyper_search(hyper_orchestrator)
 
         logger.info("Meteor runtime initialized")
+
+    def _wire_graph_subscribers(self) -> None:
+        """Wire event bus topics to auto-persist into the asset graph."""
+
+        def _on_host(payload: dict) -> None:
+            subnet_id = payload.get("subnet_id")
+            self.graph.upsert_host(
+                ip=payload["ip"],
+                hostname=payload.get("hostname"),
+                os=payload.get("os"),
+                subnet_id=subnet_id,
+                source=payload.get("source", "discovery"),
+            )
+
+        def _on_service(payload: dict) -> None:
+            host_id = payload.get("host_id")
+            if not host_id:
+                host_id = self.graph.upsert_host(ip=payload["ip"])
+            svc_id = self.graph.upsert_service(
+                host_id=host_id,
+                port=payload["port"],
+                name=payload.get("name", "unknown"),
+                banner=payload.get("banner", ""),
+            )
+            self.graph.add_edge("host", host_id, "service", svc_id, "RUNS_SERVICE")
+
+        def _on_vuln(payload: dict) -> None:
+            svc_id = payload["service_id"]
+            self.graph.upsert_vulnerability(
+                service_id=svc_id,
+                cve_id=payload["cve_id"],
+                severity=payload.get("severity"),
+                exploit_available=payload.get("exploit_available", False),
+            )
+            self.graph.add_edge("service", svc_id, "vulnerability", 0,
+                                "HAS_VULNERABILITY")
+
+        def _on_cred(payload: dict) -> None:
+            host_id = payload.get("host_id")
+            cred_id = self.graph.upsert_credential(
+                host_id=host_id,
+                username=payload["username"],
+                secret_type=payload["secret_type"],
+                secret_value=payload.get("secret_value", ""),
+                source=payload.get("source", "discovery"),
+            )
+            if host_id:
+                self.graph.add_edge("host", host_id, "credential", cred_id,
+                                    "CONTAINS_CREDENTIAL")
+
+        self.event_bus.subscribe("host.discovered", _on_host)
+        self.event_bus.subscribe("service.discovered", _on_service)
+        self.event_bus.subscribe("vulnerability.matched", _on_vuln)
+        self.event_bus.subscribe("credential.found", _on_cred)
 
     def handle_chat(
         self,
