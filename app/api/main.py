@@ -58,7 +58,7 @@ class MeteorRuntime:
         self.repo_root = result.repo_root
 
         self.storage = build_sqlite_adapter(self.config.storage, self.repo_root)
-        self.model_registry = build_model_registry(self.config.models, self.repo_root)
+        self.model_registry = build_model_registry(self.config, self.repo_root)
         self.memory = build_sqlite_memory_adapter(self.storage)
         self.retrieval = build_sqlite_retrieval_adapter(self.storage)
         self.policy = build_sql_policy_engine(self.storage)

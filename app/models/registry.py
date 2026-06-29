@@ -27,9 +27,7 @@ class ModelRegistry:
 
     def get_adapter(self, profile_name: Optional[str] = None) -> ModelAdapter:
         """Get or build a model adapter for the given profile.
-
         If profile_name is None, uses the default profile from config.
-        Caches adapters to avoid reloading models.
         """
         if profile_name is None:
             profile_name = self.config.models.default_profile

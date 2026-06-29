@@ -49,13 +49,22 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
     session_id = request.session_id or f"session-{datetime.now(timezone.utc).timestamp()}"
 
-    result = runtime.handle_chat(
-        prompt=request.prompt,
-        session_id=session_id,
-        max_tokens=request.max_tokens,
-        temperature=request.temperature,
-        metadata=request.metadata,
-    )
+    try:
+        result = runtime.handle_chat(
+            prompt=request.prompt,
+            session_id=session_id,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            metadata=request.metadata,
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response_text=f"[silk-o2 unavailable]: {exc}",
+            finish_reason="error",
+            token_usage={"total_tokens": 0},
+            session_id=session_id,
+            metadata={"error": str(exc)},
+        )
 
     return ChatResponse(
         response_text=result["response_text"],
