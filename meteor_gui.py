@@ -16,6 +16,7 @@ import sys
 # ── Paths ─────────────────────────────────────────────────────────────
 REPO = Path(__file__).resolve().parent
 CONFIG_PATH = REPO / "config" / "meteor.yaml"
+ICON_PATH = REPO / "assets" / "meteor_icon_64.png"
 
 # ── Colour Palette ────────────────────────────────────────────────────
 BLACK      = "#000000"
@@ -51,6 +52,11 @@ class MeteorGUI:
         self.root.configure(bg=BLACK)
         self.root.geometry("780x560")
         self.root.minsize(640, 480)
+
+        # App icon
+        if ICON_PATH.exists():
+            self._icon_img = tk.PhotoImage(file=str(ICON_PATH))
+            self.root.iconphoto(True, self._icon_img)
 
         # ── Status data ───────────────────────────────────────────────
         self.status_data = {
@@ -104,12 +110,18 @@ class MeteorGUI:
         header_frame = tk.Frame(self.root, bg=BLACK)
         header_frame.pack(fill="x", padx=24, pady=(20, 4))
 
-        # Logo mark
-        logo_canvas = tk.Canvas(header_frame, width=32, height=32, bg=BLACK, highlightthickness=0)
-        logo_canvas.create_oval(4, 4, 28, 28, outline=NEON_PURPLE, width=2)
-        logo_canvas.create_oval(10, 10, 22, 22, fill=NEON_PURPLE, outline="")
-        logo_canvas.pack(side="left", padx=(0, 12))
-        logo_canvas.create_text(16, 16, text="M", fill=BLACK, font=(GOOGLE_SANS, 14, "bold"))
+        # Logo — use the app icon if available, fallback to canvas M
+        if ICON_PATH.exists():
+            self._logo_img = tk.PhotoImage(file=str(ICON_PATH))
+            logo_label = tk.Label(header_frame, image=self._logo_img, bg=BLACK)
+            logo_label.image = self._logo_img
+            logo_label.pack(side="left", padx=(0, 12))
+        else:
+            logo_canvas = tk.Canvas(header_frame, width=32, height=32, bg=BLACK, highlightthickness=0)
+            logo_canvas.create_oval(4, 4, 28, 28, outline=NEON_PURPLE, width=2)
+            logo_canvas.create_oval(10, 10, 22, 22, fill=NEON_PURPLE, outline="")
+            logo_canvas.create_text(16, 16, text="M", fill=BLACK, font=(GOOGLE_SANS, 14, "bold"))
+            logo_canvas.pack(side="left", padx=(0, 12))
 
         title_frame = tk.Frame(header_frame, bg=BLACK)
         title_frame.pack(side="left", fill="x", expand=True)

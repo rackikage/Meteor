@@ -75,7 +75,7 @@ class InfiltrationGrinder:
     ) -> None:
         self._graph = graph
         self._bus = event_bus
-        self._scanner = scanner or StealthScanner()
+        self._scanner = scanner or StealthScanner(event_bus=event_bus)
         self._noise = noise or NoiseFloorSampler()
         self._min_workers = min_workers
         self._max_workers = max_workers
