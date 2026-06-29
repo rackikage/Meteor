@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.endpoints import chat, health, hyper_search, memory, retrieval
 from app.bootstrap import bootstrap
+from app.dispatcher.grinder import InfiltrationGrinder
+from app.dispatcher.noise import NoiseFloorSampler
 from app.graph.event_bus import AssetEventBus
 from app.graph.sqlite_graph import SQLiteAssetGraph
 from app.memory.sqlite_adapter import build_sqlite_memory_adapter
@@ -44,6 +46,8 @@ class MeteorRuntime:
         self.policy = None
         self.graph = None
         self.event_bus = None
+        self.noise = None
+        self.grinder = None
 
     def initialize(self) -> None:
         """Initialize all runtime components."""
@@ -68,6 +72,12 @@ class MeteorRuntime:
         self.graph = SQLiteAssetGraph(self.storage)
 
         self._wire_graph_subscribers()
+
+        self.noise = NoiseFloorSampler(interval_s=2.0)
+        self.grinder = InfiltrationGrinder(
+            graph=self.graph, event_bus=self.event_bus,
+            noise=self.noise,
+        )
 
         self.observability.register_health_check("model", self.model_registry.health)
         self.observability.register_health_check("memory", self.memory.health)
