@@ -470,7 +470,7 @@ class MeteorChat:
 # ═══════════════════════════════════════════════════════════════════════
 def main() -> None:
     root = tk.Tk()
-    app = SilkChat(root)
+    app = MeteorChat(root)
     root.mainloop()
 
 
