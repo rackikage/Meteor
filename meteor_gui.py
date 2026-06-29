@@ -34,10 +34,13 @@ FONT_FAMILY = "Google Sans"  # falls back to Segoe UI / Helvetica
 
 def _find_google_sans() -> str:
     """Resolve Google Sans or best available fallback."""
-    available = {f.name.lower() for f in font.families()}
-    for name in ("Google Sans", "Product Sans", "Segoe UI", "Helvetica Neue", "Helvetica", "TkDefaultFont"):
-        if name.lower() in available or name == "TkDefaultFont":
-            return name
+    try:
+        available = {f.name.lower() for f in font.families()}
+        for name in ("Google Sans", "Product Sans", "Segoe UI", "Helvetica Neue", "Helvetica", "TkDefaultFont"):
+            if name.lower() in available or name == "TkDefaultFont":
+                return name
+    except (RuntimeError, AttributeError):
+        pass
     return "TkDefaultFont"
 
 
@@ -48,6 +51,17 @@ GOOGLE_SANS = _find_google_sans()
 class MeteorGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
+
+        # Re-resolve font now that root exists
+        global GOOGLE_SANS
+        try:
+            available = {f.name.lower() for f in font.families(root=root)}
+            for name in ("Google Sans", "Product Sans", "Segoe UI", "Helvetica Neue", "Helvetica"):
+                if name.lower() in available:
+                    GOOGLE_SANS = name
+                    break
+        except Exception:
+            pass
         self.root.title("Meteor — Runtime Monitor")
         self.root.configure(bg=BLACK)
         self.root.geometry("780x560")
