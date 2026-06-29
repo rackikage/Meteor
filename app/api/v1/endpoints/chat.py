@@ -59,7 +59,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
     except Exception as exc:
         return ChatResponse(
-            response_text=f"[silk-o2 unavailable]: {exc}",
+            response_text=f"[Meteor]: {exc}",
             finish_reason="error",
             token_usage={"total_tokens": 0},
             session_id=session_id,

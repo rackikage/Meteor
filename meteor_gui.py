@@ -1,5 +1,5 @@
-"""silk-o2 — Meteor Chat Interface
-OLED Black · Neon Purple · Silver · Local-First AI Runtime
+"""Meteor — Local-First AI Runtime
+OLED Black · Neon Purple · Silver
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ GREEN       = "#00E676"
 AMBER       = "#FFD740"
 RED         = "#FF5252"
 
-MODEL_NAME  = "silk-o2"
+MODEL_NAME  = "Meteor"
 FONT_FAMILY = "Helvetica"
 MSG_MAX_LEN = 80  # chars per line for word wrap
 
@@ -53,10 +53,10 @@ def _resolve_font(root: tk.Tk) -> str:
 # ═══════════════════════════════════════════════════════════════════════
 # Chat App
 # ═══════════════════════════════════════════════════════════════════════
-class SilkChat:
+class MeteorChat:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("silk-o2")
+        self.root.title("Meteor")
         self.root.configure(bg=BLACK)
         self.root.geometry("820x620")
         self.root.minsize(600, 450)
@@ -81,10 +81,9 @@ class SilkChat:
         self._bind_keys()
 
         # Welcome message
-        self._add_message("silk-o2", (
-            "I'm silk-o2 — your local AI runtime. "
-            "I can scan networks, query the graph, and execute tools. "
-            "What would you like to do?"
+        self._add_message("Meteor", (
+            "Meteor runtime ready. I can scan networks, query the graph, "
+            "and execute tools. What would you like to do?"
         ))
 
     # ── Styles ──────────────────────────────────────────────────────
