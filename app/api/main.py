@@ -20,6 +20,7 @@ from app.dispatcher.grinder import InfiltrationGrinder
 from app.dispatcher.noise import NoiseFloorSampler
 from app.graph.event_bus import AssetEventBus
 from app.graph.sqlite_graph import SQLiteAssetGraph
+from app.graph.tools import GraphQueryTool
 from app.memory.sqlite_adapter import build_sqlite_memory_adapter
 from app.memory.triggers import install_memory_triggers
 from app.models.registry import build_model_registry
@@ -48,6 +49,7 @@ class MeteorRuntime:
         self.event_bus = None
         self.noise = None
         self.grinder = None
+        self.graph_tool = None
 
     def initialize(self) -> None:
         """Initialize all runtime components."""
@@ -78,6 +80,8 @@ class MeteorRuntime:
             graph=self.graph, event_bus=self.event_bus,
             noise=self.noise,
         )
+
+        self.graph_tool = GraphQueryTool(self.graph)
 
         self.observability.register_health_check("model", self.model_registry.health)
         self.observability.register_health_check("memory", self.memory.health)
