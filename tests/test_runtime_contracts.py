@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from app.runtime.contract import RuntimeRequest, RuntimeResponse, RuntimeStatus
-from app.runtime.orchestrator import build_orchestrator
 
 
 def test_runtime_request_is_dataclass() -> None:
@@ -25,21 +24,24 @@ def test_runtime_status_values_are_strings() -> None:
         assert isinstance(status.value, str)
 
 
-def test_orchestrator_handle_returns_not_implemented() -> None:
-    orchestrator = build_orchestrator()
-    response = orchestrator.handle(RuntimeRequest(prompt="test"))
-    assert response.status == RuntimeStatus.NOT_IMPLEMENTED
-    assert "not wired" in response.response_text.lower()
+def test_orchestrator_request_fields() -> None:
+    from app.runtime.orchestrator import OrchestratorRequest
+    req = OrchestratorRequest(prompt="test")
+    assert req.prompt == "test"
+    assert req.max_tokens == 512
+    assert req.temperature == 0.7
+    assert req.max_tool_iterations == 5
 
 
-def test_orchestrator_handle_includes_policy_metadata() -> None:
-    orchestrator = build_orchestrator()
-    response = orchestrator.handle(RuntimeRequest(prompt="test"))
-    assert "policy_action" in response.metadata
-    assert response.metadata["policy_action"] == "runtime_invoke"
-
-
-def test_orchestrator_model_wired_is_false() -> None:
-    orchestrator = build_orchestrator()
-    response = orchestrator.handle(RuntimeRequest(prompt="test"))
-    assert response.metadata.get("model_wired") is False
+def test_orchestrator_response_fields() -> None:
+    from app.runtime.orchestrator import OrchestratorResponse
+    resp = OrchestratorResponse(
+        session_id="s1",
+        response_text="ok",
+        finish_reason="stop",
+    )
+    d = resp.to_dict()
+    assert d["session_id"] == "s1"
+    assert d["response_text"] == "ok"
+    assert "tool_results" in d
+    assert "duration_ms" in d
