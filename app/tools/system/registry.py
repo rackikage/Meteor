@@ -42,13 +42,14 @@ class SystemTool:
 
 
 class SystemToolRegistry:
-    def __init__(self, storage: Optional[Any] = None) -> None:
+    def __init__(self, storage: Optional[Any] = None, budget: Optional[Any] = None) -> None:
         self._tools: dict[str, SystemTool] = {}
         self._instances: dict[str, Any] = {}
         self._audit_log: list[dict] = []
         self._approval_callbacks: list[Callable[[str, str, dict], bool]] = []
         self._auto_approve_patterns: list[str] = []
         self._storage = storage
+        self._budget = budget
 
     def register(self, name: str, instance: Any, description: str, version: str = "1.0.0", capabilities: Optional[list] = None) -> SystemTool:
         from dataclasses import dataclass, field
@@ -83,7 +84,9 @@ class SystemToolRegistry:
         self._tools[tool_name].policy_checked += 1
         path = context.get("path", "") or context.get("command", "") or ""
         allowed = True
+        denied_reason = ""
 
+        # SQL policy gate
         if self._storage:
             try:
                 rows = self._storage.execute(
@@ -100,12 +103,23 @@ class SystemToolRegistry:
                 )
                 if rows:
                     allowed = rows[0]["action_gate"] == "allow"
+                    if not allowed:
+                        denied_reason = f"SQL policy deny: {tool_name}.{operation} on {path}"
             except Exception:
                 allowed = True
+
+        # Signal budget gate
+        if allowed and self._budget:
+            forecast = self._budget.forecast_for(tool_name, operation, **context)
+            budget_allowed, remaining = self._budget.consume(forecast)
+            if not budget_allowed:
+                allowed = False
+                denied_reason = f"Signal budget exhausted: need {forecast.signal_score:.0f}, have {remaining:.0f}"
 
         self._audit_log.append({
             "tool": tool_name, "operation": operation, "context": context,
             "path": path, "allowed": allowed,
+            "denied_reason": denied_reason,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         return allowed
