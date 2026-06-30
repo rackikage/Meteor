@@ -26,14 +26,13 @@ from app.graph.event_bus import AssetEventBus
 from app.graph.sqlite_graph import SQLiteAssetGraph
 from app.tools.pentest.scanner import StealthScanner, ScanConfig
 from app.tools.pentest.raw_scanner import HybridScanner
+from app.tools.pentest.ports import (
+    DEFAULT_COMMON_PORTS,
+    DEFAULT_SUBSET_PORTS,
+    DEFAULT_SWEEP_PORTS,
+)
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_COMMON_PORTS = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443,
-                        445, 993, 995, 1723, 3306, 3389, 5432, 5900, 6379,
-                        8080, 8443, 27017]
-DEFAULT_SUBSET_PORTS = [22, 80, 443, 445, 3389, 8080]
-DEFAULT_SWEEP_PORTS = [22, 80, 443, 445]
 
 
 @dataclass
@@ -155,6 +154,31 @@ class InfiltrationGrinder:
             "services_discovered": self._stats.services_discovered,
             "wall_time_ms": self._stats.wall_time_ms,
         })
+        return self._stats
+
+    async def grind_hosts_batch(
+        self,
+        ips: list[str],
+        ports: Optional[list[int]] = None,
+    ) -> GrinderStats:
+        """Scan multiple hosts concurrently; returns aggregate stats."""
+        ports = ports or DEFAULT_COMMON_PORTS
+        if not ips:
+            return self._stats
+
+        import time
+        t0 = time.monotonic()
+        self._stats = GrinderStats()
+        self._stats.tasks_queued = len(ips)
+        self._running = True
+
+        try:
+            tasks = [self._grind_single_host(ip, ports) for ip in ips]
+            await self._fan_out(tasks)
+        finally:
+            self._running = False
+
+        self._stats.wall_time_ms = (time.monotonic() - t0) * 1000
         return self._stats
 
     async def grind_sector(self, cidr: Optional[str] = None,

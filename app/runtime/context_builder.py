@@ -21,6 +21,8 @@ from app.memory.contract import MemoryAdapter, MemoryType
 from app.memory.sqlite_adapter import SQLiteMemoryAdapter
 from app.retrieval.contract import RetrievedDocument, RetrievalAdapter, RetrievalQuery
 
+from app.runtime.interceptor_prompt import INTERCEPTOR_SYSTEM_PROMPT
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,12 +53,48 @@ class BuiltContext:
         """Convert to ModelInput-compatible dict."""
         from app.models.contract import ModelInput
         return ModelInput(
-            prompt=self.final_prompt,
+            prompt=self.user_prompt,
             context=self.conversation_history,
+            system_prompt=self.system_prompt,
             max_tokens=max_tokens,
             temperature=temperature,
-            metadata=self.metadata,
+            metadata={
+                **self.metadata,
+                "chat_messages": self.to_chat_messages(),
+            },
         )
+
+    def to_chat_messages(self) -> list[dict[str, str]]:
+        """Structured messages for Ollama /api/chat."""
+        parts = [self.system_prompt]
+
+        if self.corrections:
+            correction_lines = []
+            for c in self.corrections:
+                correction_lines.append(f"Correction: {c['original']} → {c['corrected']}")
+            parts.append("User corrections:\n" + "\n".join(correction_lines))
+
+        if self.retrieved_documents:
+            doc_lines = []
+            for i, doc in enumerate(self.retrieved_documents, 1):
+                doc_lines.append(f"[{i}] {doc.source}: {doc.content[:400]}")
+            parts.append("Retrieved context:\n" + "\n".join(doc_lines))
+
+        if self.metadata.get("depth_context"):
+            parts.append(str(self.metadata["depth_context"]))
+
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": "\n\n".join(parts)},
+        ]
+
+        for msg in self.conversation_history:
+            role = msg.get("role", "user")
+            if role not in ("user", "assistant", "system"):
+                role = "user"
+            messages.append({"role": role, "content": msg.get("content", "")})
+
+        messages.append({"role": "user", "content": self.user_prompt})
+        return messages
 
 
 class ContextBuilder:
@@ -76,12 +114,7 @@ class ContextBuilder:
         model_input = ctx.to_model_input()
     """
 
-    DEFAULT_SYSTEM_PROMPT = (
-        "You are Meteor, a local-first AI assistant running entirely on this machine. "
-        "All data stays local. You have access to conversation history, indexed documents, "
-        "and user corrections. When citing information, reference the source if available. "
-        "Be concise and direct."
-    )
+    DEFAULT_SYSTEM_PROMPT = INTERCEPTOR_SYSTEM_PROMPT
 
     def __init__(
         self,

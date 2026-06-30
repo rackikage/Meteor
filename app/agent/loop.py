@@ -33,15 +33,9 @@ from app.graph.event_bus import AssetEventBus
 from app.graph.sqlite_graph import SQLiteAssetGraph
 from app.dispatcher.grinder import InfiltrationGrinder
 from app.plugins.loader import PluginRegistry
+from app.tools.pentest.ports import DEFAULT_DEPTH_PORTS
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_DEPTH_PORTS = {
-    0: [22, 80, 443, 445, 3389, 8080, 8443],
-    1: [21, 23, 25, 53, 110, 111, 135, 139, 143, 993, 995, 3306, 5432, 5900, 6379, 27017],
-    2: list(range(1, 1025)),
-}
-
 
 @dataclass
 class AgentReport:

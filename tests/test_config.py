@@ -29,11 +29,6 @@ def test_config_policy_default_action_is_deny() -> None:
     assert config.policy.default_action == "deny"
 
 
-def test_config_policy_has_allow_rules() -> None:
-    config = MeteorConfig.load(CONFIG_PATH)
-    assert len(config.policy.allow_rules) > 0
-
-
 def test_config_model_profile_has_required_fields() -> None:
     config = MeteorConfig.load(CONFIG_PATH)
     profile = config.models.profiles[config.models.default_profile]

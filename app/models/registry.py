@@ -44,6 +44,25 @@ class ModelRegistry:
         logger.info("Built adapter for profile: %s (backend=%s)", profile_name, profile.backend)
         return adapter
 
+    def resolve_for_request(self, metadata: Optional[dict] = None) -> ModelAdapter:
+        """Route simple tasks to a fast profile; complex ops to default/heavy."""
+        meta = metadata or {}
+        if meta.get("profile"):
+            return self.get_adapter(str(meta["profile"]))
+
+        complexity = meta.get("complexity", "standard")
+        if complexity == "simple":
+            for name, profile in self.config.models.profiles.items():
+                if profile.role == "fast":
+                    return self.get_adapter(name)
+
+        if complexity == "heavy":
+            for name, profile in self.config.models.profiles.items():
+                if profile.role == "heavy":
+                    return self.get_adapter(name)
+
+        return self.get_adapter()
+
     def _build_adapter(self, profile: ModelProfile) -> ModelAdapter:
         """Build an adapter based on the profile's backend type."""
         backend = profile.backend.lower()

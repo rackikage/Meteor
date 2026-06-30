@@ -188,7 +188,9 @@ class TestContextBuilder:
     def test_to_model_input(self, context_builder):
         ctx = context_builder.build("s7", "test")
         mi = ctx.to_model_input(max_tokens=256, temperature=0.5)
-        assert mi.prompt == ctx.final_prompt
+        assert mi.prompt == ctx.user_prompt
+        assert mi.system_prompt == ctx.system_prompt
+        assert "chat_messages" in mi.metadata
 
     def test_health(self, context_builder):
         health = context_builder.health()

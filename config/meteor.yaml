@@ -5,35 +5,64 @@ app:
   debug: false
 
 models:
-  default_profile: ollama-local
+  default_profile: ollama-heavy
   profiles:
-    ollama-local:
+    ollama-heavy:
+      backend: ollama
+      model_path: "llama3.1:8b"
+      context_window: 8192
+      temperature: 0.7
+      temperature_structured: 0.2
+      temperature_creative: 0.8
+      max_tokens: 1024
+      wired: true
+      base_url: "http://localhost:11434"
+      role: heavy
+    ollama-fast:
       backend: ollama
       model_path: "llama3.2"
       context_window: 4096
-      temperature: 0.7
+      temperature: 0.5
+      temperature_structured: 0.2
+      temperature_creative: 0.75
       max_tokens: 512
       wired: true
+      base_url: "http://localhost:11434"
+      role: fast
+    ollama-coder:
+      backend: ollama
+      model_path: "qwen2.5-coder:14b"
+      context_window: 8192
+      temperature: 0.3
+      temperature_structured: 0.15
+      temperature_creative: 0.6
+      max_tokens: 1024
+      wired: true
+      base_url: "http://localhost:11434"
+      role: default
+    ollama-local:
+      backend: ollama
+      model_path: "mistral-nemo:12b"
+      context_window: 8192
+      temperature: 0.7
+      temperature_structured: 0.2
+      temperature_creative: 0.85
+      max_tokens: 1024
+      wired: true
+      base_url: "http://localhost:11434"
+      role: default
     llama3.2-3b-local:
       backend: llama_cpp
       model_path: "llama3.2-3b.gguf"
       context_window: 4096
       temperature: 0.7
+      temperature_structured: 0.2
+      temperature_creative: 0.8
       max_tokens: 512
       wired: true
 
 policy:
   default_action: deny
-  allow_rules:
-    - subject: runtime
-      action: invoke
-    - subject: filesystem
-      action: read
-      paths:
-        - "./config"
-        - "./data"
-    - subject: index
-      action: read
 
 memory:
   backend: sqlite

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import dataclasses
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,10 @@ class ModelProfile:
     temperature: float
     max_tokens: int
     wired: bool
+    base_url: str = "http://localhost:11434"
+    temperature_structured: float = 0.2
+    temperature_creative: float = 0.8
+    role: str = "default"
 
 
 @dataclass
@@ -32,16 +37,8 @@ class ModelsConfig:
 
 
 @dataclass
-class PolicyAllowRule:
-    subject: str
-    action: str
-    paths: list[str] = field(default_factory=list)
-
-
-@dataclass
 class PolicyConfig:
     default_action: str
-    allow_rules: list[PolicyAllowRule]
 
 
 @dataclass
@@ -93,8 +90,9 @@ class MeteorConfig:
 
         app = AppConfig(**raw["app"])
 
+        profile_fields = {f.name for f in dataclasses.fields(ModelProfile)}
         profiles = {
-            name: ModelProfile(**profile_data)
+            name: ModelProfile(**{k: v for k, v in profile_data.items() if k in profile_fields})
             for name, profile_data in raw["models"]["profiles"].items()
         }
         models = ModelsConfig(
@@ -102,12 +100,8 @@ class MeteorConfig:
             profiles=profiles,
         )
 
-        allow_rules = [
-            PolicyAllowRule(**rule) for rule in raw["policy"].get("allow_rules", [])
-        ]
         policy = PolicyConfig(
             default_action=raw["policy"]["default_action"],
-            allow_rules=allow_rules,
         )
 
         memory = MemoryConfig(**raw["memory"])

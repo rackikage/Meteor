@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -34,6 +35,7 @@ class SQLiteAdapter(StorageAdapter):
         self.config = config
         self.repo_root = repo_root
         self._connections: dict[str, sqlite3.Connection] = {}
+        self._lock = threading.Lock()
         self._init_databases()
 
     def _init_databases(self) -> None:
@@ -51,7 +53,7 @@ class SQLiteAdapter(StorageAdapter):
 
             resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
-            conn = sqlite3.connect(str(resolved_path))
+            conn = sqlite3.connect(str(resolved_path), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
@@ -706,13 +708,13 @@ class SQLiteAdapter(StorageAdapter):
         if store not in self._connections:
             raise ValueError(f"Unknown store: {store}. Available: {list(self._connections.keys())}")
 
-        conn = self._connections[store]
-        cursor = conn.execute(sql, params)
+        with self._lock:
+            conn = self._connections[store]
+            cursor = conn.execute(sql, params)
 
-        if sql.strip().upper().startswith(("SELECT", "PRAGMA", "WITH", "EXPLAIN")):
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
-        else:
+            if sql.strip().upper().startswith(("SELECT", "PRAGMA", "WITH", "EXPLAIN")):
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
             conn.commit()
             return []
 
@@ -721,10 +723,11 @@ class SQLiteAdapter(StorageAdapter):
         if store not in self._connections:
             raise ValueError(f"Unknown store: {store}")
 
-        conn = self._connections[store]
-        rows = conn.execute(
-            "SELECT version, name, applied_at FROM _migrations ORDER BY version"
-        ).fetchall()
+        with self._lock:
+            conn = self._connections[store]
+            rows = conn.execute(
+                "SELECT version, name, applied_at FROM _migrations ORDER BY version"
+            ).fetchall()
 
         return [
             MigrationRecord(version=row["version"], name=row["name"], applied_at=row["applied_at"])
@@ -734,12 +737,13 @@ class SQLiteAdapter(StorageAdapter):
     def health(self) -> dict:
         """Return health status of all database connections."""
         health = {}
-        for store_name, conn in self._connections.items():
-            try:
-                conn.execute("SELECT 1").fetchone()
-                health[store_name] = {"healthy": True, "error": None}
-            except Exception as e:
-                health[store_name] = {"healthy": False, "error": str(e)}
+        with self._lock:
+            for store_name, conn in self._connections.items():
+                try:
+                    conn.execute("SELECT 1").fetchone()
+                    health[store_name] = {"healthy": True, "error": None}
+                except Exception as e:
+                    health[store_name] = {"healthy": False, "error": str(e)}
 
         return {
             "healthy": all(h["healthy"] for h in health.values()),
@@ -749,9 +753,10 @@ class SQLiteAdapter(StorageAdapter):
 
     def close(self) -> None:
         """Close all database connections."""
-        for conn in self._connections.values():
-            conn.close()
-        self._connections.clear()
+        with self._lock:
+            for conn in self._connections.values():
+                conn.close()
+            self._connections.clear()
         logger.info("All database connections closed")
 
 

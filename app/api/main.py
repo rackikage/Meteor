@@ -22,6 +22,7 @@ from app.plugins.loader import PluginRegistry
 from app.bootstrap import bootstrap
 from app.dispatcher.grinder import InfiltrationGrinder
 from app.dispatcher.noise import NoiseFloorSampler
+from app.evidence.tracker import EvidenceTracker
 from app.graph.event_bus import AssetEventBus
 from app.graph.sqlite_graph import SQLiteAssetGraph
 from app.graph.tools import GraphQueryTool
@@ -31,6 +32,9 @@ from app.models.registry import build_model_registry
 from app.observability.sqlite_adapter import build_sqlite_observability_adapter
 from app.policy.sql_engine import build_sql_policy_engine
 from app.retrieval.sqlite_adapter import build_sqlite_retrieval_adapter
+from app.runtime.context_builder import ContextBuilder
+from app.runtime.orchestrator import MeteorOrchestrator, OrchestratorRequest
+from app.runtime.tool_executor import ToolExecutor
 from app.search.orchestrator import HyperSearchOrchestrator
 from app.storage.sqlite_adapter import build_sqlite_adapter
 
@@ -58,6 +62,10 @@ class MeteorRuntime:
         self.strategy = None
         self.plugins = None
         self.node_controller = None
+        self.evidence = None
+        self.context_builder = None
+        self.tool_executor = None
+        self.orchestrator = None
 
     def initialize(self) -> None:
         """Initialize all runtime components."""
@@ -117,10 +125,29 @@ class MeteorRuntime:
             plugins=self.plugins,
         )
 
+        self.evidence = EvidenceTracker()
+        self.context_builder = ContextBuilder(
+            memory=self.memory,
+            retrieval=self.retrieval,
+            evidence_tracker=self.evidence,
+        )
+        self.tool_executor = ToolExecutor()
+        self.orchestrator = MeteorOrchestrator(
+            policy=self.policy,
+            context=self.context_builder,
+            model=self.model_registry.get_adapter(),
+            tools=self.tool_executor,
+            memory=self.memory,
+            evidence=self.evidence,
+            observability=self.observability,
+            model_registry=self.model_registry,
+        )
+
         self.observability.register_health_check("model", self.model_registry.health)
         self.observability.register_health_check("memory", self.memory.health)
         self.observability.register_health_check("retrieval", self.retrieval.health)
         self.observability.register_health_check("storage", self.storage.health)
+        self.observability.register_health_check("orchestrator", self.orchestrator.health)
 
         hyper_orchestrator = HyperSearchOrchestrator(retrieval_adapter=self.retrieval)
         hyper_search.init_hyper_search(hyper_orchestrator)
@@ -189,24 +216,29 @@ class MeteorRuntime:
         temperature: float,
         metadata: dict,
     ) -> dict:
-        """Handle a chat completion request."""
-        from app.models.contract import ModelInput
-
-        adapter = self.model_registry.get_adapter()
-        model_input = ModelInput(
-            prompt=prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            metadata=metadata,
+        """Handle a chat completion request via the canonical orchestrator pipeline."""
+        response = self.orchestrator.handle(
+            OrchestratorRequest(
+                prompt=prompt,
+                session_id=session_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                metadata=metadata,
+            )
         )
 
-        result = adapter.complete(model_input)
-
         return {
-            "response_text": result.response_text,
-            "finish_reason": result.finish_reason,
-            "token_usage": result.token_usage,
-            "metadata": result.metadata,
+            "response_text": response.response_text,
+            "finish_reason": response.finish_reason,
+            "token_usage": response.token_usage,
+            "metadata": {
+                **metadata,
+                **response.metadata,
+                "policy_checked": response.policy_checked,
+                "duration_ms": response.duration_ms,
+                "tool_results": len(response.tool_results),
+                "evidence_count": len(response.evidence),
+            },
         }
 
     def handle_chat_stream(
@@ -217,19 +249,17 @@ class MeteorRuntime:
         temperature: float,
         metadata: dict,
     ):
-        """Handle a streaming chat completion request."""
-        from app.models.contract import ModelInput
-
-        adapter = self.model_registry.get_adapter()
-        model_input = ModelInput(
-            prompt=prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            metadata=metadata,
+        """Handle a streaming chat completion request via the orchestrator."""
+        yield from self.orchestrator.handle_stream(
+            OrchestratorRequest(
+                prompt=prompt,
+                session_id=session_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                metadata=metadata,
+                streaming=True,
+            )
         )
-
-        for token in adapter.stream(model_input):
-            yield token
 
     def shutdown(self) -> None:
         """Shutdown all runtime components."""

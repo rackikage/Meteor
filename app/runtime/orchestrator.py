@@ -28,13 +28,14 @@ from app.evidence.contract import ConfidenceLevel, EvidenceRecord
 from app.evidence.tracker import EvidenceTracker
 from app.memory.contract import MemoryAdapter, MemoryEntry, MemoryType
 from app.models.contract import ModelAdapter, ModelInput
+from app.models.task_temperature import resolve_temperature
 from app.observability.contract import AuditEntry
 from app.policy.sql_engine import SqlPolicyEngine
 from app.retrieval.contract import RetrievalAdapter
 from app.runtime.context_builder import BuiltContext, ContextBuilder
 from app.runtime.tool_executor import ToolExecutor, ToolRequest, ToolResult, ToolResultStatus
 
-logger = logging.getLogger(__name__)
+from app.runtime.rate_limiter import OpClass, get_rate_limiter
 
 
 @dataclass
@@ -101,14 +102,51 @@ class MeteorOrchestrator:
         memory: MemoryAdapter,
         evidence: EvidenceTracker,
         observability=None,
+        model_registry=None,
     ) -> None:
         self.policy = policy
         self.context = context
         self.model = model
+        self.model_registry = model_registry
         self.tools = tools
         self.memory = memory
         self.evidence = evidence
         self.observability = observability
+
+    def _resolve_model(self, request: OrchestratorRequest) -> ModelAdapter:
+        if self.model_registry is not None:
+            return self.model_registry.resolve_for_request(request.metadata)
+        return self.model
+
+    def _model_input_from_context(
+        self,
+        ctx: BuiltContext,
+        request: OrchestratorRequest,
+    ) -> ModelInput:
+        profile = None
+        if self.model_registry is not None:
+            profile_name = request.metadata.get("profile")
+            if profile_name:
+                profile = self.model_registry.config.models.profiles.get(str(profile_name))
+            else:
+                profile = self.model_registry.config.models.profiles.get(
+                    self.model_registry.config.models.default_profile
+                )
+        temperature = request.temperature
+        if profile is not None:
+            temperature = resolve_temperature(profile, request.metadata)
+
+        return ModelInput(
+            prompt=ctx.user_prompt,
+            context=ctx.conversation_history,
+            system_prompt=ctx.system_prompt,
+            max_tokens=request.max_tokens,
+            temperature=temperature,
+            metadata={
+                **request.metadata,
+                "chat_messages": ctx.to_chat_messages(),
+            },
+        )
 
     def handle(self, request: OrchestratorRequest) -> OrchestratorResponse:
         """Execute the full pipeline synchronously."""
@@ -116,6 +154,33 @@ class MeteorOrchestrator:
         start = time.monotonic()
 
         session_id = request.session_id or str(uuid.uuid4())
+
+        op_class = OpClass.DEEP if request.metadata.get("op_class") == "deep" else OpClass.QUICK
+        limiter = get_rate_limiter()
+        limit = limiter.acquire(session_id, op_class)
+        if not limit.allowed:
+            return OrchestratorResponse(
+                session_id=session_id,
+                response_text=limit.reason,
+                finish_reason="rate_limited",
+                duration_ms=(time.monotonic() - start) * 1000,
+                policy_checked=True,
+            )
+
+        try:
+            return self._handle_inner(request, session_id, start)
+        finally:
+            if op_class == OpClass.DEEP:
+                limiter.release(session_id, op_class)
+
+    def _handle_inner(
+        self,
+        request: OrchestratorRequest,
+        session_id: str,
+        start: float,
+    ) -> OrchestratorResponse:
+        """Execute pipeline after rate-limit acquire."""
+        import time
 
         # 1. Policy Gate
         from app.policy.contract import PolicyRequest, PolicySubject
@@ -136,17 +201,12 @@ class MeteorOrchestrator:
             )
 
         # 2. Context Assembly
-        ctx = self.context.build(session_id, request.prompt)
+        ctx = self.context.build(session_id, request.prompt, metadata=request.metadata)
+        model = self._resolve_model(request)
 
         # 3. Model Inference
-        model_input = ModelInput(
-            prompt=ctx.final_prompt,
-            context=ctx.conversation_history,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-            metadata=request.metadata,
-        )
-        model_output = self.model.complete(model_input)
+        model_input = self._model_input_from_context(ctx, request)
+        model_output = model.complete(model_input)
 
         response_text = model_output.response_text
 
@@ -178,7 +238,7 @@ class MeteorOrchestrator:
                 max_tokens=request.max_tokens,
                 temperature=request.temperature,
             )
-            follow_output = self.model.complete(follow_up)
+            follow_output = model.complete(follow_up)
             response_text = follow_output.response_text
             iterations += 1
 
@@ -238,19 +298,31 @@ class MeteorOrchestrator:
 
     def handle_stream(self, request: OrchestratorRequest) -> Iterator[str]:
         """Execute the pipeline with streaming output."""
+        import time
+        start = time.monotonic()
         session_id = request.session_id or str(uuid.uuid4())
 
-        ctx = self.context.build(session_id, request.prompt)
-        model_input = ctx.to_model_input(
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-        )
+        op_class = OpClass.DEEP if request.metadata.get("op_class") == "deep" else OpClass.QUICK
+        limiter = get_rate_limiter()
+        limit = limiter.acquire(session_id, op_class)
+        if not limit.allowed:
+            yield limit.reason
+            return
 
-        for token in self.model.stream(model_input):
-            yield token
+        try:
+            ctx = self.context.build(session_id, request.prompt, metadata=request.metadata)
+            model = self._resolve_model(request)
+            model_input = self._model_input_from_context(ctx, request)
 
-        # Persist in background
-        self._persist_conversation(session_id, request.prompt, "[streamed]", ctx)
+            collected: list[str] = []
+            for token in model.stream(model_input):
+                collected.append(token)
+                yield token
+
+            self._persist_conversation(session_id, request.prompt, "".join(collected), ctx)
+        finally:
+            if op_class == OpClass.DEEP:
+                limiter.release(session_id, op_class)
 
     def _parse_tool_request(self, response_text: str) -> Optional[ToolRequest]:
         """Parse a tool invocation from model output.

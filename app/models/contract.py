@@ -9,6 +9,7 @@ from typing import Iterator
 class ModelInput:
     prompt: str
     context: list[dict] = field(default_factory=list)
+    system_prompt: str = ""
     max_tokens: int = 512
     temperature: float = 0.7
     metadata: dict = field(default_factory=dict)

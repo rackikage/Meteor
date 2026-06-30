@@ -12,24 +12,21 @@ The model is not the product. The GGUF file in this repo is a local artifact for
 
 Local-first means authority stays on the machine that owns the data. No cloud dependency is required to run, reason, or store. The system works offline by design. Cloud backends are an adapter option, not a requirement.
 
-## Core doctrine
+## Documentation
 
-1. Policy controls authority.
-2. Boundaries define what the system can never do.
-3. Adapters isolate change.
-4. Runtime is the product.
-5. Memory is infrastructure.
-6. Retrieval is separate from inference.
-7. Evidence precedes conclusions.
-8. Contracts outlive implementations.
-9. Every capability must be smoke-tested.
-10. Every component must be replaceable.
+- [Engineering doctrine](docs/doctrine.md) — principles and non-negotiables
+- [Architecture](docs/architecture.md) — layer definitions and coupling rules
+- [Branching](docs/branching.md) — git workflow
 
-See [docs/doctrine.md](docs/doctrine.md) for the full engineering law.
+## Desktop app (macOS)
 
-## Architecture
+Install the Orchestrator GUI (single Dock entry, symmetrical purple meteor icon):
 
-See [docs/architecture.md](docs/architecture.md) for the full layer definitions, text diagram, and forbidden coupling rules.
+```bash
+./scripts/install_meteor_app.sh
+```
+
+Pin **`~/Applications/Meteor.app`** to the Dock. Remove any older Meteor shortcuts first. Relaunching focuses the console and places the cursor in the `meteor>` command line.
 
 ## Status
 
