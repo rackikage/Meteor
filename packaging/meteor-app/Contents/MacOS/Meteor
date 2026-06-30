@@ -6,4 +6,4 @@ METEOR_ROOT="@METEOR_ROOT@"
 cd "$METEOR_ROOT"
 export PYTHONPATH="$METEOR_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
-exec python3 "$METEOR_ROOT/meteor_gui.py" "$@"
+exec python3 "$METEOR_ROOT/run.py" "$@"

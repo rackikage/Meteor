@@ -46,7 +46,7 @@ def test_parse_llm_json_intent() -> None:
     assert data["action"] == "port_scan"
 
 
-def test_llm_payload_maps_vuln_check_to_research() -> None:
+def test_llm_payload_maps_vuln_check_to_scan() -> None:
     intent = _llm_payload_to_intent(
         {"action": "vuln_check", "target": "", "params": {"service": "smb"}, "reason": "smb share"},
         default_gateway="192.168.1.1",
@@ -54,8 +54,7 @@ def test_llm_payload_maps_vuln_check_to_research() -> None:
         user_text="see if that SMB share is vulnerable",
     )
     assert intent is not None
-    assert intent.command == "research"
-    assert intent.args["service"] == "smb"
+    assert intent.command == "scan"
 
 
 def test_resolve_intent_llm_fallback(tmp_path) -> None:

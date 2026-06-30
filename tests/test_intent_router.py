@@ -40,11 +40,10 @@ def test_infiltrate_with_cidr() -> None:
     assert intent.args["depth"] == 2
 
 
-def test_research_ssh() -> None:
-    intent = route_intent("research ssh exploits")
+def test_research_ssh_maps_to_scan() -> None:
+    intent = route_intent("research ssh exploits", default_gateway="192.168.1.1")
     assert intent is not None
-    assert intent.command == "research"
-    assert intent.args["service"] == "ssh"
+    assert intent.command == "scan"
 
 
 def test_unknown_prompt_returns_none() -> None:

@@ -103,11 +103,12 @@ def _llm_payload_to_intent(
 
     if command == "research":
         service = params.get("service") or "smb"
-        if "smb" in user_text.lower():
-            service = "smb"
-        elif "ssh" in user_text.lower():
-            service = "ssh"
-        return RoutedIntent(command, {"service": str(service).lower()}, 0.75, reason)
+        port_map = {"ssh": 22, "smb": 445, "rdp": 3389, "http": 80, "https": 443, "ftp": 21}
+        tgt = target or default_gateway
+        args = {"target": tgt}
+        if str(service).lower() in port_map:
+            args["port_hint"] = port_map[str(service).lower()]
+        return RoutedIntent("scan", args, 0.75, reason)
 
     if command == "investigate":
         depth = params.get("depth") or _extract_depth(user_text)

@@ -134,7 +134,12 @@ def route_intent(
 
     if _match_any(lowered, _RESEARCH):
         service = _extract_service(raw)
-        return RoutedIntent("research", {"service": service}, 0.85, f"intel on {service}")
+        port_map = {"ssh": 22, "smb": 445, "rdp": 3389, "http": 80, "https": 443, "ftp": 21}
+        scan_target = _extract_ip(raw) or default_gateway
+        args: dict = {"target": scan_target}
+        if service in port_map:
+            args["port_hint"] = port_map[service]
+        return RoutedIntent("scan", args, 0.85, f"probe {service} on {scan_target}")
 
     cidr = _extract_cidr(raw)
     ip = _extract_ip(raw)

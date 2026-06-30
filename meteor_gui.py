@@ -1,4 +1,4 @@
-"""Meteor Interceptor — sleek chat UI for network infiltration ops."""
+"""Meteor Hackmachine — minimal chat UI for LAN infiltration."""
 
 from __future__ import annotations
 
@@ -42,41 +42,27 @@ GREEN = "#00E676"
 AMBER = "#FBBF24"
 RED = "#FF5252"
 
-APP_NAME = "METEOR INTERCEPTOR"
+APP_NAME = "METEOR HACKMACHINE"
+
+WELCOME = """Hackmachine online. Tell me what to hit.
+
+dig into the network · scan the gateway · infiltrate the subnet"""
+
+QUICK_ACTIONS: list[tuple[str, str, str]] = []
+
+HELP_TEXT = """Commands
+────────
+  dig into the network   full LAN sweep
+  scan <ip>              port probe (default: gateway)
+  infiltrate <cidr>      subnet infiltration
+  graph                  asset map
+  pivot <ip>             lateral paths
+  stats                  runtime status
+  help                   this panel"""
+
+
 FONT_MONO = "Menlo"
 FONT_UI = "Helvetica Neue"
-
-WELCOME = """☄  METEOR INTERCEPTOR — online
-
-I intercept targets and infiltrate networks on your LAN.
-Ask in plain language — I'll route the ops pipeline.
-
-  · "Dig into the network"
-  · "Scan the gateway"
-  · "Infiltrate the subnet"
-  · "Research SSH exploits"
-"""
-
-HELP_TEXT = """Available operations
-────────────────────
-  dig into the network   full LAN investigation
-  scan <ip>              port sweep (default: gateway)
-  infiltrate <cidr>      depth sweep of subnet
-  research <service>     CVE / exploit intel
-  graph                  asset topology
-  pivot <ip>             lateral paths
-  stats                  runtime telemetry
-  help                   show this panel
-
-Boot resolves router IP and LAN subnet automatically."""
-
-QUICK_ACTIONS = [
-    ("Dig network", "__investigate__", MAGENTA),
-    ("Scan gateway", "__scan_gw__", CYAN),
-    ("Infiltrate LAN", "__infil_lan__", AMBER),
-    ("Intel SSH", "research ssh", GREEN),
-    ("Asset graph", "graph", SILVER),
-]
 
 
 def _resolve_fonts(root: tk.Tk) -> tuple[str, str]:
@@ -152,18 +138,23 @@ class SingleInstanceGuard:
                 pass
 
 
-class MeteorInterceptor:
-    """Sleek chat-first GUI for Meteor infiltration ops."""
+class MeteorHackmachine:
+    """Minimal hackmachine chat UI."""
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Meteor Interceptor")
+        self.root.title("Meteor Hackmachine")
         self.root.configure(bg=BLACK)
-        self.root.geometry("720x820")
-        self.root.minsize(480, 560)
+        self.root.minsize(340, 420)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self.session_id = f"int-{datetime.now(timezone.utc).strftime('%H%M%S')}"
+        # Free-floating default size; user resizes freely
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        w, h = min(540, int(sw * 0.38)), min(680, int(sh * 0.62))
+        x, y = (sw - w) // 2, (sh - h) // 2
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
+
+        self.session_id = f"hk-{datetime.now(timezone.utc).strftime('%H%M%S')}"
         self._instance_guard: Optional[SingleInstanceGuard] = None
         self._busy = False
         self._runtime_ready = False
@@ -191,86 +182,71 @@ class MeteorInterceptor:
         self.root.after(75, lambda: self._input.icursor(tk.END))
 
     def _build_shell(self) -> None:
-        self._build_header()
-        self._build_chat()
-        self._build_quick_actions()
-        self._build_composer()
-        self._build_status_bar()
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(1, weight=1)
+
+        self._build_header().grid(row=0, column=0, sticky="ew")
+        self._build_chat().grid(row=1, column=0, sticky="nsew")
+        self._build_composer().grid(row=2, column=0, sticky="ew")
+        self._build_status_bar().grid(row=3, column=0, sticky="ew")
         self._bind_keys()
 
-    def _build_header(self) -> None:
-        strip = tk.Frame(self.root, bg=PANEL, height=44)
-        strip.pack(fill="x", side="top")
-        strip.pack_propagate(False)
+    def _build_header(self) -> tk.Frame:
+        strip = tk.Frame(self.root, bg=BLACK, padx=14, pady=10)
+        if sys.platform == "darwin":
+            strip.grid_columnconfigure(0, minsize=72)
 
-        left_pad = 78 if sys.platform == "darwin" else 14
-        inner = tk.Frame(strip, bg=PANEL)
-        inner.pack(fill="both", expand=True, padx=(left_pad, 14), pady=8)
-
-        brand = tk.Frame(inner, bg=PANEL)
-        brand.pack(side="left")
+        inner = tk.Frame(strip, bg=BLACK)
+        inner.pack(fill="x")
 
         tk.Label(
-            brand, text="☄", bg=PANEL, fg=PURPLE,
-            font=(self._font_mono, 14, "bold"),
+            inner, text="☄ hackmachine", bg=BLACK, fg=WHITE,
+            font=(self._font_ui, 12, "bold"),
         ).pack(side="left")
 
-        title_col = tk.Frame(brand, bg=PANEL)
-        title_col.pack(side="left", padx=(6, 0))
-
-        tk.Label(
-            title_col, text="METEOR", bg=PANEL, fg=WHITE,
-            font=(self._font_ui, 11, "bold"),
-        ).pack(anchor="w")
-
-        tk.Label(
-            title_col, text="interceptor · infiltrate anything", bg=PANEL, fg=DIM,
-            font=(self._font_mono, 8),
-        ).pack(anchor="w")
-
-        right = tk.Frame(inner, bg=PANEL)
+        right = tk.Frame(inner, bg=BLACK)
         right.pack(side="right")
 
-        self._link_led = tk.Canvas(right, width=8, height=8, bg=PANEL, highlightthickness=0)
-        self._link_led.create_oval(1, 1, 7, 7, fill=AMBER, outline="")
-        self._link_led.pack(side="left", padx=(0, 6))
+        self._link_led = tk.Canvas(right, width=6, height=6, bg=BLACK, highlightthickness=0)
+        self._link_led.create_oval(0, 0, 6, 6, fill=AMBER, outline="")
+        self._link_led.pack(side="left", padx=(0, 5))
 
         self._status = tk.Label(
-            right, text="BOOT", bg=PANEL, fg=AMBER,
-            font=(self._font_mono, 9, "bold"),
+            right, text="boot", bg=BLACK, fg=DIM,
+            font=(self._font_mono, 9),
         )
         self._status.pack(side="left")
+        return strip
 
-    def _build_chat(self) -> None:
+    def _build_chat(self) -> tk.Frame:
         wrap = tk.Frame(self.root, bg=BLACK)
-        wrap.pack(fill="both", expand=True, padx=0, pady=0)
+        wrap.columnconfigure(0, weight=1)
+        wrap.rowconfigure(0, weight=1)
 
         self._chat = tk.Text(
             wrap, bg=BLACK, fg=SILVER, insertbackground=PURPLE,
             font=(self._font_mono, 11), wrap="word", bd=0,
-            highlightthickness=0, padx=16, pady=12,
-            state="disabled", cursor="arrow", spacing1=2, spacing3=6,
+            highlightthickness=0, padx=14, pady=8,
+            state="disabled", cursor="arrow", spacing3=4,
         )
-        scroll = tk.Scrollbar(wrap, command=self._chat.yview, bg=BLACK, troughcolor=PANEL, width=10)
+        scroll = tk.Scrollbar(wrap, command=self._chat.yview, bg=BLACK, troughcolor=BLACK, width=8)
         self._chat.configure(yscrollcommand=scroll.set)
-        self._chat.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
+        self._chat.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
 
         tags = {
-            "welcome": {"foreground": SILVER, "spacing3": 10},
-            "user_label": {"foreground": CYAN, "font": (self._font_mono, 9, "bold"), "spacing1": 14},
+            "welcome": {"foreground": DIM, "font": (self._font_ui, 11)},
+            "user_label": {"foreground": CYAN, "font": (self._font_mono, 8), "spacing1": 12},
             "user_body": {
-                "foreground": WHITE, "background": BUBBLE_USER,
-                "lmargin1": 48, "lmargin2": 48, "rmargin": 16,
-                "spacing1": 2, "spacing3": 4,
+                "foreground": WHITE, "lmargin1": 24, "lmargin2": 24, "rmargin": 8,
+                "spacing1": 0, "spacing3": 8,
             },
-            "bot_label": {"foreground": PURPLE, "font": (self._font_mono, 9, "bold"), "spacing1": 14},
+            "bot_label": {"foreground": PURPLE, "font": (self._font_mono, 8), "spacing1": 12},
             "bot_body": {
-                "foreground": WHITE, "background": BUBBLE_BOT,
-                "lmargin1": 16, "lmargin2": 16, "rmargin": 48,
-                "spacing1": 2, "spacing3": 4,
+                "foreground": WHITE, "lmargin1": 8, "lmargin2": 8, "rmargin": 24,
+                "spacing1": 0, "spacing3": 8,
             },
-            "system": {"foreground": DIM, "font": (self._font_mono, 9), "spacing1": 6},
+            "system": {"foreground": DIM, "font": (self._font_mono, 9)},
             "stdout": {"foreground": GREEN},
             "info": {"foreground": SILVER},
             "warn": {"foreground": AMBER},
@@ -282,62 +258,38 @@ class MeteorInterceptor:
         }
         for name, opts in tags.items():
             self._chat.tag_configure(name, **opts)
+        return wrap
 
-    def _build_quick_actions(self) -> None:
-        tk.Frame(self.root, bg=BORDER, height=1).pack(fill="x", side="bottom")
-        bar = tk.Frame(self.root, bg=PANEL, height=42)
-        bar.pack(fill="x", side="bottom")
-        bar.pack_propagate(False)
-
-        inner = tk.Frame(bar, bg=PANEL)
-        inner.pack(fill="x", padx=12, pady=8)
-
-        for label, template, color in QUICK_ACTIONS:
-            btn = tk.Button(
-                inner, text=label, bg=CARD, fg=color,
-                activebackground=GRID, activeforeground=WHITE,
-                font=(self._font_mono, 9), bd=0, relief="flat",
-                highlightthickness=1, highlightbackground=BORDER,
-                cursor="hand2", padx=10, pady=4,
-                command=lambda t=template: self._load_action(t),
-            )
-            btn.pack(side="left", padx=(0, 6))
-
-    def _build_composer(self) -> None:
-        bar = tk.Frame(self.root, bg=CARD, height=56)
-        bar.pack(fill="x", side="bottom")
-        bar.pack_propagate(False)
-
-        inner = tk.Frame(bar, bg=CARD)
-        inner.pack(fill="both", expand=True, padx=12, pady=10)
+    def _build_composer(self) -> tk.Frame:
+        bar = tk.Frame(self.root, bg=BLACK, padx=12, pady=(0, 10))
+        inner = tk.Frame(bar, bg=GRID, highlightthickness=1, highlightbackground=BORDER)
+        inner.pack(fill="x")
+        inner.columnconfigure(0, weight=1)
 
         self._input = tk.Entry(
             inner, bg=GRID, fg=WHITE, insertbackground=PURPLE,
             font=(self._font_ui, 12), bd=0, relief="flat",
-            highlightthickness=1, highlightbackground=BORDER,
-            highlightcolor=PURPLE,
+            highlightthickness=0,
         )
-        self._input.pack(side="left", fill="x", expand=True, ipady=8, padx=(0, 8))
+        self._input.grid(row=0, column=0, sticky="ew", padx=(10, 4), pady=8)
 
         self._send_btn = tk.Button(
-            inner, text="→", bg=PURPLE, fg=WHITE,
-            activebackground=VIOLET, activeforeground=WHITE,
-            font=(self._font_ui, 14, "bold"), bd=0, cursor="hand2",
-            width=3, command=self._send,
+            inner, text="↵", bg=GRID, fg=PURPLE,
+            activebackground=GRID, activeforeground=WHITE,
+            font=(self._font_ui, 13), bd=0, cursor="hand2",
+            command=self._send,
         )
-        self._send_btn.pack(side="right")
+        self._send_btn.grid(row=0, column=1, padx=(0, 8), pady=4)
+        return bar
 
-    def _build_status_bar(self) -> None:
-        tk.Frame(self.root, bg=PURPLE, height=1).pack(fill="x", side="bottom")
-        bar = tk.Frame(self.root, bg=PANEL, height=22)
-        bar.pack(fill="x", side="bottom")
-        bar.pack_propagate(False)
+    def _build_status_bar(self) -> tk.Frame:
+        bar = tk.Frame(self.root, bg=BLACK, padx=12, pady=(0, 8))
         self._footer = tk.Label(
-            bar,
-            text="scope:—  target:—  graph:—  signal:OK",
-            bg=PANEL, fg=DIM, font=(self._font_mono, 8), anchor="w", padx=12,
+            bar, text="", bg=BLACK, fg=DIM,
+            font=(self._font_mono, 8), anchor="w",
         )
-        self._footer.pack(fill="both", expand=True)
+        self._footer.pack(fill="x")
+        return bar
 
     def _bind_keys(self) -> None:
         self._input.bind("<Return>", lambda _e: self._send())
@@ -349,6 +301,18 @@ class MeteorInterceptor:
     def _warm_runtime(self) -> None:
         def work() -> None:
             try:
+                from app.runtime.ollama_launcher import ensure_ollama_running, is_ollama_running
+
+                if not is_ollama_running() and not ensure_ollama_running():
+                    self.root.after(
+                        0,
+                        self._bot_message,
+                        "Ollama is not running — chat and LLM intent routing will be limited.\n"
+                        "Install: curl -fsSL https://ollama.com/install.sh | sh\n"
+                        "Or start manually: ollama serve",
+                        "warn",
+                    )
+
                 scope = discover_network_scope()
                 self._scope = scope
                 self.root.after(0, self._on_scope_ready, scope)
@@ -414,7 +378,7 @@ class MeteorInterceptor:
 
     def _bot_message(self, text: str, tag: str = "stdout") -> None:
         self._chat.configure(state="normal")
-        self._chat.insert(tk.END, "METEOR\n", "bot_label")
+        self._chat.insert(tk.END, "hackmachine\n", "bot_label")
         if tag in ("stdout", "info", "warn", "error", "head", "accent", "dim", "welcome"):
             self._chat.insert(tk.END, f"{text}\n", tag)
         else:
@@ -426,7 +390,7 @@ class MeteorInterceptor:
         self._hide_typing()
         self._chat.configure(state="normal")
         self._typing_mark = self._chat.index(tk.END)
-        self._chat.insert(tk.END, "METEOR is intercepting…\n", "typing")
+        self._chat.insert(tk.END, "hackmachine is working…\n", "typing")
         self._chat.configure(state="disabled")
         self._chat.see(tk.END)
 
@@ -441,7 +405,7 @@ class MeteorInterceptor:
     def _begin_stream_bubble(self) -> None:
         self._hide_typing()
         self._chat.configure(state="normal")
-        self._chat.insert(tk.END, "METEOR\n", "bot_label")
+        self._chat.insert(tk.END, "hackmachine\n", "bot_label")
         self._stream_body_mark = self._chat.index(tk.END)
         self._chat.insert(self._stream_body_mark, "", "bot_body")
         self._chat.configure(state="disabled")
@@ -532,7 +496,10 @@ class MeteorInterceptor:
                 elif cmd == "infiltrate":
                     self._do_infiltrate(runtime, args)
                 elif cmd == "research":
-                    self._do_research(runtime, args)
+                    self._do_scan(runtime, {
+                        "target": self._scope_gateway(),
+                        **({"port": args["service"]} if args.get("service") else {}),
+                    })
                 elif cmd == "graph":
                     self._do_graph(runtime)
                 elif cmd == "pivot":
@@ -826,7 +793,7 @@ class MeteorInterceptor:
 
 def main() -> None:
     root = tk.Tk()
-    app = MeteorInterceptor(root)
+    app = MeteorHackmachine(root)
 
     guard = SingleInstanceGuard(app.focus_input, root)
     if not guard.try_acquire():
