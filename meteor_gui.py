@@ -14,7 +14,7 @@ from tkinter import font
 from typing import Callable, Optional
 
 from app.gui.intent_llm import resolve_intent
-from app.gui.macos_window import configure_macos_window
+from app.gui.macos_window import configure_macos_window, macos_content_padx
 from app.runtime.depth_session_store import SessionFindings, get_depth_session_store
 from app.runtime.rate_limiter import OpClass, get_rate_limiter
 from app.tools.pentest.network_scope import NetworkScope, discover_network_scope
@@ -47,8 +47,6 @@ APP_NAME = "METEOR HACKMACHINE"
 WELCOME = """Hackmachine online. Tell me what to hit.
 
 dig into the network · scan the gateway · infiltrate the subnet"""
-
-QUICK_ACTIONS: list[tuple[str, str, str]] = []
 
 HELP_TEXT = """Commands
 ────────
@@ -182,30 +180,39 @@ class MeteorHackmachine:
         self.root.after(75, lambda: self._input.icursor(tk.END))
 
     def _build_shell(self) -> None:
+        pad_l, pad_r = macos_content_padx(14)
         self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=0)
         self.root.rowconfigure(1, weight=1)
+        self.root.rowconfigure(2, weight=0)
 
-        self._build_header().grid(row=0, column=0, sticky="ew")
-        self._build_chat().grid(row=1, column=0, sticky="nsew")
-        self._build_composer().grid(row=2, column=0, sticky="ew")
-        self._build_status_bar().grid(row=3, column=0, sticky="ew")
+        self._build_header(pad_l, pad_r).grid(row=0, column=0, sticky="ew")
+        self._build_chat(pad_l, pad_r).grid(row=1, column=0, sticky="nsew")
+        self._build_bottom(pad_l, pad_r).grid(row=2, column=0, sticky="ew")
         self._bind_keys()
+        self.root.bind("<Configure>", self._on_root_configure, add="+")
 
-    def _build_header(self) -> tk.Frame:
-        strip = tk.Frame(self.root, bg=BLACK, padx=14, pady=10)
-        if sys.platform == "darwin":
-            strip.grid_columnconfigure(0, minsize=72)
+    def _on_root_configure(self, event: tk.Event) -> None:
+        if event.widget is not self.root:
+            return
+        width = max(event.width - 40, 120)
+        self._footer.config(wraplength=width)
+
+    def _build_header(self, pad_l: int, pad_r: int) -> tk.Frame:
+        strip = tk.Frame(self.root, bg=BLACK)
+        strip.columnconfigure(0, weight=1)
 
         inner = tk.Frame(strip, bg=BLACK)
-        inner.pack(fill="x")
+        inner.grid(row=0, column=0, sticky="ew", padx=(pad_l, pad_r), pady=(8, 6))
+        inner.columnconfigure(1, weight=1)
 
         tk.Label(
             inner, text="☄ hackmachine", bg=BLACK, fg=WHITE,
             font=(self._font_ui, 12, "bold"),
-        ).pack(side="left")
+        ).grid(row=0, column=0, sticky="w")
 
         right = tk.Frame(inner, bg=BLACK)
-        right.pack(side="right")
+        right.grid(row=0, column=2, sticky="e")
 
         self._link_led = tk.Canvas(right, width=6, height=6, bg=BLACK, highlightthickness=0)
         self._link_led.create_oval(0, 0, 6, 6, fill=AMBER, outline="")
@@ -218,7 +225,7 @@ class MeteorHackmachine:
         self._status.pack(side="left")
         return strip
 
-    def _build_chat(self) -> tk.Frame:
+    def _build_chat(self, pad_l: int, pad_r: int) -> tk.Frame:
         wrap = tk.Frame(self.root, bg=BLACK)
         wrap.columnconfigure(0, weight=1)
         wrap.rowconfigure(0, weight=1)
@@ -226,24 +233,28 @@ class MeteorHackmachine:
         self._chat = tk.Text(
             wrap, bg=BLACK, fg=SILVER, insertbackground=PURPLE,
             font=(self._font_mono, 11), wrap="word", bd=0,
-            highlightthickness=0, padx=14, pady=8,
+            highlightthickness=0, padx=0, pady=8,
             state="disabled", cursor="arrow", spacing3=4,
         )
-        scroll = tk.Scrollbar(wrap, command=self._chat.yview, bg=BLACK, troughcolor=BLACK, width=8)
+        scroll = tk.Scrollbar(
+            wrap, command=self._chat.yview,
+            bg=BLACK, troughcolor=BLACK, width=8,
+            highlightthickness=0, bd=0,
+        )
         self._chat.configure(yscrollcommand=scroll.set)
-        self._chat.grid(row=0, column=0, sticky="nsew")
-        scroll.grid(row=0, column=1, sticky="ns")
+        self._chat.grid(row=0, column=0, sticky="nsew", padx=(pad_l, 4), pady=(0, 4))
+        scroll.grid(row=0, column=1, sticky="ns", padx=(0, pad_r), pady=(0, 4))
 
         tags = {
             "welcome": {"foreground": DIM, "font": (self._font_ui, 11)},
             "user_label": {"foreground": CYAN, "font": (self._font_mono, 8), "spacing1": 12},
             "user_body": {
-                "foreground": WHITE, "lmargin1": 24, "lmargin2": 24, "rmargin": 8,
+                "foreground": WHITE, "lmargin1": 16, "lmargin2": 16, "rmargin": 12,
                 "spacing1": 0, "spacing3": 8,
             },
             "bot_label": {"foreground": PURPLE, "font": (self._font_mono, 8), "spacing1": 12},
             "bot_body": {
-                "foreground": WHITE, "lmargin1": 8, "lmargin2": 8, "rmargin": 24,
+                "foreground": WHITE, "lmargin1": 8, "lmargin2": 8, "rmargin": 12,
                 "spacing1": 0, "spacing3": 8,
             },
             "system": {"foreground": DIM, "font": (self._font_mono, 9)},
@@ -260,10 +271,18 @@ class MeteorHackmachine:
             self._chat.tag_configure(name, **opts)
         return wrap
 
-    def _build_composer(self) -> tk.Frame:
-        bar = tk.Frame(self.root, bg=BLACK, padx=12, pady=(0, 10))
-        inner = tk.Frame(bar, bg=GRID, highlightthickness=1, highlightbackground=BORDER)
-        inner.pack(fill="x")
+    def _build_bottom(self, pad_l: int, pad_r: int) -> tk.Frame:
+        panel = tk.Frame(self.root, bg=BLACK)
+        panel.columnconfigure(0, weight=1)
+        panel.rowconfigure(0, weight=0)
+        panel.rowconfigure(1, weight=0)
+
+        composer = tk.Frame(panel, bg=BLACK)
+        composer.grid(row=0, column=0, sticky="ew", padx=(pad_l, pad_r), pady=(0, 4))
+        composer.columnconfigure(0, weight=1)
+
+        inner = tk.Frame(composer, bg=GRID, highlightthickness=1, highlightbackground=BORDER)
+        inner.grid(row=0, column=0, sticky="ew")
         inner.columnconfigure(0, weight=1)
 
         self._input = tk.Entry(
@@ -271,25 +290,26 @@ class MeteorHackmachine:
             font=(self._font_ui, 12), bd=0, relief="flat",
             highlightthickness=0,
         )
-        self._input.grid(row=0, column=0, sticky="ew", padx=(10, 4), pady=8)
+        self._input.grid(row=0, column=0, sticky="ew", padx=(10, 4), ipady=6)
 
         self._send_btn = tk.Button(
             inner, text="↵", bg=GRID, fg=PURPLE,
             activebackground=GRID, activeforeground=WHITE,
             font=(self._font_ui, 13), bd=0, cursor="hand2",
-            command=self._send,
+            width=2, command=self._send,
         )
-        self._send_btn.grid(row=0, column=1, padx=(0, 8), pady=4)
-        return bar
+        self._send_btn.grid(row=0, column=1, padx=(0, 6), pady=4, sticky="ns")
 
-    def _build_status_bar(self) -> tk.Frame:
-        bar = tk.Frame(self.root, bg=BLACK, padx=12, pady=(0, 8))
+        footer_bar = tk.Frame(panel, bg=BLACK)
+        footer_bar.grid(row=1, column=0, sticky="ew", padx=(pad_l, pad_r), pady=(0, 8))
+        footer_bar.columnconfigure(0, weight=1)
+
         self._footer = tk.Label(
-            bar, text="", bg=BLACK, fg=DIM,
-            font=(self._font_mono, 8), anchor="w",
+            footer_bar, text="", bg=BLACK, fg=DIM,
+            font=(self._font_mono, 8), anchor="w", justify="left",
         )
-        self._footer.pack(fill="x")
-        return bar
+        self._footer.grid(row=0, column=0, sticky="ew")
+        return panel
 
     def _bind_keys(self) -> None:
         self._input.bind("<Return>", lambda _e: self._send())
@@ -344,25 +364,6 @@ class MeteorHackmachine:
     def _scope_cidr(self) -> str:
         return self._scope.cidr if self._scope else "127.0.0.1/32"
 
-    def _resolve_action_template(self, template: str) -> str:
-        if not template.startswith("__"):
-            return template
-        if self._scope is None:
-            return "help"
-        mapping = {
-            "__investigate__": "dig into the network",
-            "__scan_gw__": f"scan {self._scope.gateway}",
-            "__infil_lan__": f"infiltrate {self._scope.cidr}",
-        }
-        return mapping.get(template, template)
-
-    def _load_action(self, template: str) -> None:
-        resolved = self._resolve_action_template(template)
-        self._input.delete(0, tk.END)
-        self._input.insert(0, resolved)
-        self.focus_input()
-        self._send()
-
     def _append(self, text: str, tag: str = "stdout") -> None:
         self._chat.configure(state="normal")
         self._chat.insert(tk.END, text, tag)
@@ -390,7 +391,7 @@ class MeteorHackmachine:
         self._hide_typing()
         self._chat.configure(state="normal")
         self._typing_mark = self._chat.index(tk.END)
-        self._chat.insert(tk.END, "hackmachine is working…\n", "typing")
+        self._chat.insert(tk.END, "working…\n", "typing")
         self._chat.configure(state="disabled")
         self._chat.see(tk.END)
 
@@ -429,7 +430,7 @@ class MeteorHackmachine:
     def _set_footer(self, **parts: str) -> None:
         defaults = {"scope": "—", "target": "—", "graph": "—", "signal": "OK"}
         defaults.update(parts)
-        self._footer.config(text="  ".join(f"{k}:{v}" for k, v in defaults.items()))
+        self._footer.config(text=" · ".join(f"{k}:{v}" for k, v in defaults.items()))
 
     def _send(self) -> None:
         text = self._input.get().strip()
