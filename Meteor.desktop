@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Meteor
+Comment=Local-first AI runtime
+Exec=bash -c 'cd %k && python3 run.py'
+Icon=%k/assets/meteor_icon_256.png
+Path=%k
+Terminal=false
+Categories=Science;Network;

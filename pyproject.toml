@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "meteor"
@@ -13,14 +13,17 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=4.9",
     "playwright>=1.40",
-    "llama-cpp-python>=0.2.0",
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "rapidfuzz>=3.0.0",
     "httpx>=0.25.0",
+    "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]
+llama = [
+    "llama-cpp-python>=0.2.0",
+]
 dev = [
     "pytest>=7.4",
 ]
