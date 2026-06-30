@@ -37,8 +37,17 @@ _INFILTRATE = (
 _SCAN = (
     r"\bscan(?:ning)?\b",
     r"\bport\s+sweep\b",
-    r"\bprobe\s+(?:the\s+)?(?:gateway|router|host|target)\b",
     r"\bcheck\s+(?:ports?|services?)\b",
+)
+
+_PROBE = (
+    r"\b(async|probe)\s+engine\b",
+    r"\bprobe\s+toolkit\b",
+    r"\brun\s+probe\b",
+    r"\bnon[- ]blocking\s+probe\b",
+    r"\btcp\s+verification\b",
+    r"^probe\s+\d{1,3}(?:\.\d{1,3}){3}\b",
+    r"\bprobe\s+(?:the\s+)?(?:gateway|router|host|target)\b",
 )
 
 _RESEARCH = (
@@ -174,6 +183,12 @@ def route_intent(
             0.95,
             "full LAN investigation",
         )
+
+    if _match_any(lowered, _PROBE):
+        target = ip or default_gateway
+        if re.search(r"\b(gateway|router)\b", lowered, re.IGNORECASE):
+            target = default_gateway
+        return RoutedIntent("probe", {"target": target}, 0.88, f"async probe {target}")
 
     if _match_any(lowered, _SCAN):
         target = ip or default_gateway

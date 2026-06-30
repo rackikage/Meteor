@@ -52,6 +52,7 @@ HELP_TEXT = """Commands
 ────────
   dig into the network   full LAN sweep
   scan <ip>              port probe (default: gateway)
+  probe <ip>             async TCP engine (state machine + banners)
   infiltrate <cidr>      subnet infiltration
   graph                  asset map
   posture / firewall     kernel + perimeter assessment
@@ -510,6 +511,8 @@ class MeteorHackmachine:
                     self._do_stats(runtime)
                 elif cmd == "posture":
                     self._do_posture(runtime, args)
+                elif cmd == "probe":
+                    self._do_probe(runtime, args)
                 elif cmd == "help":
                     self.root.after(0, self._bot_message, HELP_TEXT, "head")
                 elif cmd == "chat":
@@ -778,6 +781,28 @@ class MeteorHackmachine:
         self.root.after(0, self._bot_message, result.markdown, "stdout")
         self.root.after(0, self._set_status, "armed", GREEN)
         self.root.after(0, self._set_footer, target=scope.gateway, signal="OK")
+
+    def _do_probe(self, runtime, args: dict) -> None:
+        from app.tools.pentest.tool_executor import get_pentest_executor
+
+        target = args.get("target") or self._scope_gateway()
+        self.root.after(0, self._set_status, "probing", CYAN)
+        self.root.after(0, self._set_footer, target=target, signal="BUSY")
+        self.root.after(0, self._bot_message, f"Launching async probe engine on {target}…", "warn")
+
+        result = get_pentest_executor().execute(
+            "probe",
+            target=target,
+            event_bus=runtime.event_bus,
+        )
+        if result.status != "ok":
+            self.root.after(0, self._bot_message, result.error or "Probe failed.", "error")
+            self.root.after(0, self._set_status, "fault", RED)
+            return
+
+        self.root.after(0, self._bot_message, result.markdown, "stdout")
+        self.root.after(0, self._set_status, "armed", GREEN)
+        self.root.after(0, self._set_footer, target=target, signal="OK")
 
     def _do_chat(self, runtime, args: dict) -> None:
         from app.runtime.orchestrator import OrchestratorRequest
