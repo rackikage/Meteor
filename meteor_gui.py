@@ -54,6 +54,7 @@ HELP_TEXT = """Commands
   scan <ip>              port probe (default: gateway)
   infiltrate <cidr>      subnet infiltration
   graph                  asset map
+  posture / firewall     kernel + perimeter assessment
   pivot <ip>             lateral paths
   stats                  runtime status
   help                   this panel"""
@@ -507,6 +508,8 @@ class MeteorHackmachine:
                     self._do_pivot(runtime, args)
                 elif cmd == "stats":
                     self._do_stats(runtime)
+                elif cmd == "posture":
+                    self._do_posture(runtime, args)
                 elif cmd == "help":
                     self.root.after(0, self._bot_message, HELP_TEXT, "head")
                 elif cmd == "chat":
@@ -751,6 +754,30 @@ class MeteorHackmachine:
             f"  noise: {noise.camouflage_multiplier}x idle={noise.is_host_idle}\n"
             f"  workers: {runtime.noise.worker_count()}"
         ), "stdout")
+
+    def _do_posture(self, runtime, args: dict) -> None:
+        from app.tools.pentest.tool_executor import get_pentest_executor
+
+        scope = self._scope or discover_network_scope()
+        self._scope = scope
+        self.root.after(0, self._set_status, "posture", CYAN)
+        self.root.after(0, self._set_footer, target=scope.gateway, signal="BUSY")
+        self.root.after(0, self._bot_message, "Assessing kernel firewall posture…", "warn")
+
+        result = get_pentest_executor().execute(
+            "posture",
+            graph_tool=runtime.graph_tool,
+            gateway=scope.gateway,
+            cidr=scope.cidr,
+        )
+        if result.status != "ok":
+            self.root.after(0, self._bot_message, result.error or "Posture assessment failed.", "error")
+            self.root.after(0, self._set_status, "fault", RED)
+            return
+
+        self.root.after(0, self._bot_message, result.markdown, "stdout")
+        self.root.after(0, self._set_status, "armed", GREEN)
+        self.root.after(0, self._set_footer, target=scope.gateway, signal="OK")
 
     def _do_chat(self, runtime, args: dict) -> None:
         from app.runtime.orchestrator import OrchestratorRequest

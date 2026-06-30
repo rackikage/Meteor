@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.endpoints import chat, health, hyper_search, memory, retrieval, nodes
+from app.api.v1.endpoints import chat, health, hyper_search, memory, retrieval, nodes, pentest
 from app.agent.loop import MeteorAgent
 from app.agent.strategy import StrategyEngine
 from app.node.controller import NodeController
@@ -151,6 +151,7 @@ class MeteorRuntime:
 
         hyper_orchestrator = HyperSearchOrchestrator(retrieval_adapter=self.retrieval)
         hyper_search.init_hyper_search(hyper_orchestrator)
+        pentest.init_pentest_runtime(get_runtime)
 
         logger.info("Meteor runtime initialized")
 
@@ -310,6 +311,7 @@ app.include_router(memory.router, prefix="/api/v1")
 app.include_router(retrieval.router, prefix="/api/v1")
 app.include_router(hyper_search.router, prefix="/api/v1")
 app.include_router(nodes.router, prefix="/api/v1")
+app.include_router(pentest.router, prefix="/api/v1")
 
 
 @app.get("/")

@@ -48,3 +48,15 @@ def test_research_ssh_maps_to_scan() -> None:
 
 def test_unknown_prompt_returns_none() -> None:
     assert route_intent("what is the weather today") is None
+
+
+def test_assess_firewall_routes_posture() -> None:
+    intent = route_intent("assess firewall posture on my router")
+    assert intent is not None
+    assert intent.command == "posture"
+
+
+def test_kernel_posture_phrasing() -> None:
+    intent = route_intent("check kernel firewall posture")
+    assert intent is not None
+    assert intent.command == "posture"

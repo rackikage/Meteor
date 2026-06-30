@@ -19,7 +19,7 @@ INTENT_CLASSIFIER_PROMPT = """You classify user requests for Meteor Interceptor,
 Return ONLY valid JSON (no markdown):
 
 {
-  "action": "<one of: port_scan|service_enum|vuln_check|investigate|infiltrate|research|graph|pivot|stats|chat>",
+  "action": "<one of: port_scan|service_enum|vuln_check|investigate|infiltrate|research|graph|pivot|stats|posture|chat>",
   "target": "<ip, cidr, or empty string>",
   "params": {<optional keys: port, service, depth>},
   "reason": "<short rationale>"
@@ -29,6 +29,7 @@ Mapping hints:
 - port_scan / service_enum → scanning hosts or ports
 - vuln_check → CVE/exploit research on a service (set params.service)
 - investigate → full LAN dig; params.depth 1-3
+- posture / firewall / kernel_posture → read-only kernel firewall assessment
 - chat → general conversation, unclear ops, or off-topic
 
 Use action "chat" when unsure."""
@@ -47,6 +48,9 @@ _ACTION_TO_COMMAND: dict[str, str] = {
     "stats": "stats",
     "help": "help",
     "chat": "chat",
+    "posture": "posture",
+    "firewall": "posture",
+    "kernel_posture": "posture",
 }
 
 
@@ -121,6 +125,9 @@ def _llm_payload_to_intent(
 
     if command == "pivot":
         return RoutedIntent(command, {"ip": target or default_gateway}, 0.75, reason)
+
+    if command == "posture":
+        return RoutedIntent(command, {}, 0.75, reason)
 
     return RoutedIntent(command, {}, 0.75, reason)
 

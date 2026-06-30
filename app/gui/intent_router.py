@@ -64,6 +64,16 @@ _STATS = (
     r"\bruntime\s+(?:stats|telemetry)\b",
 )
 
+_FIREWALL = (
+    r"\b(assess|check|audit|evaluate)\b.*\b(firewall|kernel\s+posture|posture)\b",
+    r"\b(firewall|kernel)\b.*\b(posture|assessment|audit)\b",
+    r"\b(posture|kernel)\b.*\b(firewall|assessment)\b",
+    r"\bufw\b.*\b(status|posture|audit)\b",
+    r"\bconntrack\b.*\b(check|audit|posture)\b",
+    r"\brp_filter\b",
+    r"\baccept_redirects\b",
+)
+
 _HELP = (
     r"^(?:help|\?|what\s+can\s+you\s+do)\b",
 )
@@ -127,6 +137,9 @@ def route_intent(
 
     if _match_any(lowered, _GRAPH):
         return RoutedIntent("graph", {}, 0.9, "asset graph request")
+
+    if _match_any(lowered, _FIREWALL):
+        return RoutedIntent("posture", {}, 0.92, "kernel firewall posture assessment")
 
     if _match_any(lowered, _PIVOT):
         ip = _extract_ip(raw) or default_gateway
