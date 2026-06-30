@@ -1,13 +1,17 @@
 """Meteor Agent — autonomous infiltration loop.
 
 Recursively scans, identifies, researches, and pivots through networks.
-The agent integrates the Grinder, EventBus, AssetGraph, and WebSearcher
-into a closed infiltration loop:
+The agent integrates the Grinder, EventBus, AssetGraph, WebSearcher,
+StrategyEngine, and PluginRegistry into a closed adaptive loop:
 
-  1. Scan target → discover hosts/services
-  2. Research each service → CVE/exploit intelligence
-  3. Score attack surface → prioritize high-value targets
-  4. Pivot to new hosts → repeat up to max_depth
+  1. Scan target → discover hosts/services          (Grinder)
+  2. Consult LLM strategy engine → adapt next ports  (StrategyEngine)
+  3. Research each service → CVE/exploit intel        (WebSearcher)
+  4. Run plugin analyze hooks → annotate intel        (PluginRegistry)
+  5. Score attack surface → prioritize targets
+  6. Pivot to LLM-recommended targets → repeat        (StrategyEngine)
+  7. Run plugin report hooks → final report           (PluginRegistry)
+  8. Record outcome → strategy memory for next run    (StrategyEngine)
 
 Meteor Doctrine #7: Evidence precedes conclusions. Every action is traced.
 """
@@ -22,16 +26,18 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.agent.web_search import ServiceIntel, WebSearcher
+from app.agent.strategy import StrategyEngine, ScanStrategy, DEFAULT_STRATEGY
 from app.graph.event_bus import AssetEventBus
 from app.graph.sqlite_graph import SQLiteAssetGraph
 from app.dispatcher.grinder import InfiltrationGrinder
+from app.plugins.loader import PluginRegistry
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DEPTH_PORTS = {
-    0: [22, 80, 443, 445, 3389, 8080, 8443],   # first pass: key services
+    0: [22, 80, 443, 445, 3389, 8080, 8443],
     1: [21, 23, 25, 53, 110, 111, 135, 139, 143, 993, 995, 3306, 5432, 5900, 6379, 27017],
-    2: list(range(1, 1025)),                     # full sweep if deep enough
+    2: list(range(1, 1025)),
 }
 
 
@@ -49,13 +55,20 @@ class AgentReport:
     wall_time_ms: float = 0.0
     started_at: str = ""
     completed_at: str = ""
+    strategy_reason: str = ""
+    llm_adapted: bool = False
+    plugins_active: int = 0
 
 
 class MeteorAgent:
     """Autonomous network infiltration and intelligence agent.
 
+    The LLM strategy engine (Ollama) adapts port selection and pivot targets
+    between scan phases based on partial results.  A plugin registry allows
+    custom Python modules to inject logic at scan, analyze, and report hooks.
+
     Usage:
-        agent = MeteorAgent(graph, bus, grinder)
+        agent = MeteorAgent(graph, bus, grinder, strategy=StrategyEngine())
         report = await agent.infiltrate("10.0.0.0/24", depth=2)
     """
 
@@ -65,26 +78,34 @@ class MeteorAgent:
         event_bus: AssetEventBus,
         grinder: InfiltrationGrinder,
         searcher: Optional[WebSearcher] = None,
+        strategy: Optional[StrategyEngine] = None,
+        plugins: Optional[PluginRegistry] = None,
         max_depth: int = 3,
     ) -> None:
         self._graph = graph
         self._bus = event_bus
         self._grinder = grinder
         self._searcher = searcher or WebSearcher()
+        self._strategy = strategy or StrategyEngine()
+        self._plugins = plugins or PluginRegistry()
         self._max_depth = max_depth
         self._visited: set[str] = set()
 
-    async def infiltrate(self, target: str, depth: int = 2,
-                         ports: Optional[list[int]] = None) -> AgentReport:
-        """Autonomously infiltrate a target network.
+    async def infiltrate(
+        self,
+        target: str,
+        depth: int = 2,
+        ports: Optional[list[int]] = None,
+    ) -> AgentReport:
+        """Autonomously infiltrate a target with LLM-adaptive strategy.
 
         Args:
             target: IP, CIDR, or hostname
-            depth: How many pivot hops to explore (0 = surface only)
-            ports: Port list override (defaults to depth-appropriate ports)
+            depth:  Pivot hops (0 = surface only)
+            ports:  Manual port override; None = LLM / depth-default
 
         Returns:
-            AgentReport with full intelligence
+            AgentReport enriched by strategy decisions and plugin hooks
         """
         t0 = time.monotonic()
         self._visited.clear()
@@ -99,18 +120,21 @@ class MeteorAgent:
             exploits_found=0,
             pivot_chains=[],
             started_at=datetime.now(timezone.utc).isoformat(),
+            plugins_active=len(self._plugins),
         )
 
         await self._bus.publish("scan.started", {
             "target": target, "depth": depth, "agent": "MeteorAgent",
         })
 
-        # Register the target subnet in the graph
         if "/" in target:
             self._graph.upsert_subnet(target)
 
-        # ── Layer 0: Surface scan ────────────────────────────────────
+        # ── Phase 0: Initial surface scan ────────────────────────────
         layer_ports = ports or DEFAULT_DEPTH_PORTS.get(0, [22, 80, 443])
+
+        # Allow plugins to add/modify the initial port list
+        layer_ports = self._plugins.run_scan_hooks(target, layer_ports)
 
         if "/" in target:
             stats = await self._grinder.grind_subnet(target, ports=layer_ports)
@@ -123,75 +147,149 @@ class MeteorAgent:
 
         report.depth_reached = 1
 
-        # ── Research discovered services ─────────────────────────────
-        hosts = self._graph.query(
+        # ── Phase 1: Consult LLM — adapt strategy from phase 0 data ─
+        hosts_q = self._graph.query(
             "SELECT id, ip FROM hosts WHERE source = 'grinder' ORDER BY last_seen DESC LIMIT 50"
         )
-        intelligence: list[ServiceIntel] = []
+        svc_list = self._collect_services(hosts_q)
 
-        for host in hosts:
-            hid = host["id"]
-            ip = host["ip"]
+        strategy: ScanStrategy = await self._strategy.decide(
+            hosts_found=[h["ip"] for h in hosts_q],
+            services=svc_list,
+            cves=[],           # no CVEs yet at this phase
+            depth=0,
+        )
+        report.strategy_reason = strategy.reason
+        report.llm_adapted = strategy.llm_adapted
+
+        logger.info(
+            "Strategy (%s): %s",
+            "LLM" if strategy.llm_adapted else "default",
+            strategy.reason[:120],
+        )
+
+        # ── Phase 2: Research discovered services ────────────────────
+        intelligence: list[ServiceIntel] = []
+        all_cves: list[dict] = []
+
+        # Prioritise services the LLM flagged
+        svc_list = self._sort_by_priority(svc_list, strategy.priority_services)
+
+        for svc in svc_list[:40]:
+            ip = svc["ip"]
             if ip in self._visited:
                 continue
             self._visited.add(ip)
 
-            services = self._graph.query(
-                "SELECT id, port, name, banner FROM services WHERE host_id = ?", (hid,)
+            intel = await self._searcher.research_service(
+                ip=ip,
+                port=svc["port"],
+                service=svc["name"],
+                banner=svc.get("banner", ""),
             )
-            for svc in services:
-                intel = await self._searcher.research_service(
-                    ip=ip, port=svc["port"], service=svc["name"],
-                    banner=svc.get("banner", ""),
-                )
-                intelligence.append(intel)
 
-                # Write to graph
+            # Run plugin analyze hooks
+            intel_dict = self._plugins.run_analyze_hooks({
+                "ip": ip, "port": svc["port"], "service": svc["name"],
+                "banner": svc.get("banner", ""),
+                "cves": [vars(c) for c in intel.cves],
+                "exploits": [vars(e) for e in intel.exploits],
+                "attack_surface_score": intel.attack_surface_score,
+            })
+
+            # Persist CVEs to graph
+            svc_id = svc.get("id")
+            if svc_id:
                 for cve in intel.cves:
                     vuln_id = self._graph.upsert_vulnerability(
-                        service_id=svc["id"], cve_id=cve.cve_id,
+                        service_id=svc_id, cve_id=cve.cve_id,
                         severity=cve.severity, exploit_available=cve.exploit_available,
                     )
-                    self._graph.add_edge("service", svc["id"], "vulnerability",
+                    self._graph.add_edge("service", svc_id, "vulnerability",
                                          vuln_id, "HAS_VULNERABILITY")
                     await self._bus.publish("vulnerability.matched", {
-                        "service_id": svc["id"], "cve_id": cve.cve_id,
+                        "service_id": svc_id, "cve_id": cve.cve_id,
                         "severity": cve.severity,
                     })
-
                     if cve.severity == "CRITICAL":
                         report.critical_vulns += 1
                     elif cve.severity == "HIGH":
                         report.high_vulns += 1
+                    all_cves.append({"cve_id": cve.cve_id, "severity": cve.severity,
+                                     "description": cve.description})
 
-                report.exploits_found += len(intel.exploits)
+                    self._graph.add_observation(
+                        "service", svc_id, "meteor_agent",
+                        {"attack_score": intel.attack_surface_score,
+                         "plugin_notes": intel_dict.get("custom_tag", "")},
+                    )
 
-                # Add observations for timeline
-                self._graph.add_observation(
-                    "service", svc["id"], "meteor_agent",
-                    {"attack_score": intel.attack_surface_score},
-                )
+            report.exploits_found += len(intel.exploits)
+            intelligence.append(intel)
 
         report.intelligence = intelligence
 
-        # ── Pivot: find new targets from discovered hosts ────────────
+        # ── Phase 3: LLM decides pivot strategy based on full intel ──
         if depth > 1 and report.hosts_discovered > 0:
-            next_ports = ports or DEFAULT_DEPTH_PORTS.get(1, [21, 22, 23, 80, 443, 445, 3389])
+            pivot_strategy = await self._strategy.decide(
+                hosts_found=[h["ip"] for h in hosts_q],
+                services=svc_list,
+                cves=all_cves,
+                depth=1,
+            )
+            report.strategy_reason = pivot_strategy.reason
+            report.llm_adapted = pivot_strategy.llm_adapted
 
-            for host in hosts:
-                ip = host["id"]
-                ip_addr = host["ip"]
-                # Discover adjacent hosts via common gateway patterns
-                for offset in range(1, min(depth * 10, 50)):
-                    next_ip = self._next_ip(ip_addr, offset)
-                    if next_ip and next_ip not in self._visited:
-                        self._visited.add(next_ip)
-                        try:
-                            await self._grinder.grind_host(next_ip, ports=next_ports)
-                        except Exception:
-                            pass
+            # LLM-recommended pivots first, then adjacency fallback
+            pivot_targets = list(pivot_strategy.pivot_targets)
+            if not pivot_targets:
+                pivot_targets = self._adjacency_pivots(hosts_q, depth)
 
+            next_ports = (
+                [p for p in pivot_strategy.next_ports if p not in pivot_strategy.skip_ports]
+                if pivot_strategy.llm_adapted
+                else DEFAULT_DEPTH_PORTS.get(1, [22, 80, 443, 445])
+            )
+            next_ports = self._plugins.run_scan_hooks("pivot", next_ports)
+
+            pivot_chains: list[list[str]] = []
+            for ip in pivot_targets[:20]:
+                if ip in self._visited:
+                    continue
+                self._visited.add(ip)
+                try:
+                    await self._grinder.grind_host(ip, ports=next_ports)
+                    pivot_chains.append([target, ip])
+                except Exception:
+                    pass
+
+            report.pivot_chains = pivot_chains
             report.depth_reached = min(depth, self._max_depth)
+
+        # ── Phase 4: Plugin report hooks ─────────────────────────────
+        report_dict = self._plugins.run_report_hooks({
+            "target": target,
+            "hosts_discovered": report.hosts_discovered,
+            "services_discovered": report.services_discovered,
+            "critical_vulns": report.critical_vulns,
+            "high_vulns": report.high_vulns,
+            "exploits_found": report.exploits_found,
+            "strategy_reason": report.strategy_reason,
+            "llm_adapted": report.llm_adapted,
+        })
+        # Merge any plugin-added fields back (non-destructive)
+        for k, v in report_dict.items():
+            if not hasattr(report, k):
+                logger.debug("Plugin added report field: %s", k)
+
+        # ── Phase 5: Record outcome for future strategy memory ────────
+        self._strategy.record_outcome(
+            hosts=report.hosts_discovered,
+            services=report.services_discovered,
+            critical_vulns=report.critical_vulns,
+            ports_used=layer_ports,
+            depth=depth,
+        )
 
         report.wall_time_ms = (time.monotonic() - t0) * 1000
         report.completed_at = datetime.now(timezone.utc).isoformat()
@@ -203,13 +301,56 @@ class MeteorAgent:
             "vulnerabilities": report.critical_vulns + report.high_vulns,
             "exploits_found": report.exploits_found,
             "depth_reached": report.depth_reached,
+            "llm_adapted": report.llm_adapted,
         })
 
         return report
 
+    # ── Helpers ──────────────────────────────────────────────────────
+
+    def _collect_services(self, hosts: list[dict]) -> list[dict]:
+        """Collect services for all hosts from graph."""
+        services = []
+        for host in hosts:
+            rows = self._graph.query(
+                "SELECT id, port, name, banner FROM services WHERE host_id = ?",
+                (host["id"],),
+            )
+            for r in rows:
+                services.append({
+                    "id": r["id"],
+                    "ip": host["ip"],
+                    "port": r["port"],
+                    "name": r["name"],
+                    "banner": r.get("banner", ""),
+                })
+        return services
+
+    @staticmethod
+    def _sort_by_priority(
+        services: list[dict], priority: list[str]
+    ) -> list[dict]:
+        """Reorder services so priority_services float to the top."""
+        if not priority:
+            return services
+        p_set = {s.lower() for s in priority}
+        high = [s for s in services if s.get("name", "").lower() in p_set]
+        low = [s for s in services if s.get("name", "").lower() not in p_set]
+        return high + low
+
+    def _adjacency_pivots(self, hosts: list[dict], depth: int) -> list[str]:
+        """Fallback pivot targets: IPs adjacent to discovered hosts."""
+        pivots = []
+        for host in hosts:
+            ip = host["ip"]
+            for offset in range(1, min(depth * 10, 30)):
+                nxt = self._next_ip(ip, offset)
+                if nxt and nxt not in self._visited:
+                    pivots.append(nxt)
+        return pivots
+
     @staticmethod
     def _next_ip(ip: str, offset: int) -> Optional[str]:
-        """Calculate the next IP address for lateral scanning."""
         try:
             parts = [int(p) for p in ip.split(".")]
             if len(parts) != 4:
@@ -218,6 +359,9 @@ class MeteorAgent:
             num += offset
             if num > 0xFFFFFFFF:
                 return None
-            return f"{(num >> 24) & 0xFF}.{(num >> 16) & 0xFF}.{(num >> 8) & 0xFF}.{num & 0xFF}"
+            return (
+                f"{(num >> 24) & 0xFF}.{(num >> 16) & 0xFF}."
+                f"{(num >> 8) & 0xFF}.{num & 0xFF}"
+            )
         except Exception:
             return None

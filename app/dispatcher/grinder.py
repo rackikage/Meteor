@@ -25,6 +25,7 @@ from app.dispatcher.noise import NoiseFloorSampler
 from app.graph.event_bus import AssetEventBus
 from app.graph.sqlite_graph import SQLiteAssetGraph
 from app.tools.pentest.scanner import StealthScanner, ScanConfig
+from app.tools.pentest.raw_scanner import HybridScanner
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,8 @@ class InfiltrationGrinder:
     ) -> None:
         self._graph = graph
         self._bus = event_bus
-        self._scanner = scanner or StealthScanner(event_bus=event_bus)
+        # Prefer raw SYN scanner (root) — falls back to connect-scan automatically
+        self._scanner = HybridScanner(pps=2000, connect_concurrent=200, event_bus=event_bus)
         self._noise = noise or NoiseFloorSampler()
         self._min_workers = min_workers
         self._max_workers = max_workers

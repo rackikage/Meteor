@@ -14,8 +14,11 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.endpoints import chat, health, hyper_search, memory, retrieval
+from app.api.v1.endpoints import chat, health, hyper_search, memory, retrieval, nodes
 from app.agent.loop import MeteorAgent
+from app.agent.strategy import StrategyEngine
+from app.node.controller import NodeController
+from app.plugins.loader import PluginRegistry
 from app.bootstrap import bootstrap
 from app.dispatcher.grinder import InfiltrationGrinder
 from app.dispatcher.noise import NoiseFloorSampler
@@ -52,6 +55,9 @@ class MeteorRuntime:
         self.grinder = None
         self.graph_tool = None
         self.agent = None
+        self.strategy = None
+        self.plugins = None
+        self.node_controller = None
 
     def initialize(self) -> None:
         """Initialize all runtime components."""
@@ -85,10 +91,30 @@ class MeteorRuntime:
 
         self.graph_tool = GraphQueryTool(self.graph)
 
+        # ── Strategy engine (Ollama meta-learning) ─────────────────
+        self.strategy = StrategyEngine(
+            model=self.config.models.profiles.get(
+                self.config.models.default_profile
+            ).model_path if self.config.models.profiles else "llama3.2",
+            storage=self.storage,
+        )
+        self.strategy.ensure_table()
+
+        # ── Plugin registry ────────────────────────────────────────
+        self.plugins = PluginRegistry()
+        n_plugins = self.plugins.load_all()
+        logger.info("Loaded %d plugin(s)", n_plugins)
+
+        # ── Node controller (distributed orchestration) ────────────
+        self.node_controller = NodeController()
+        nodes.init_node_controller(self.node_controller)
+
         self.agent = MeteorAgent(
             graph=self.graph,
             event_bus=self.event_bus,
             grinder=self.grinder,
+            strategy=self.strategy,
+            plugins=self.plugins,
         )
 
         self.observability.register_health_check("model", self.model_registry.health)
@@ -253,6 +279,7 @@ app.include_router(chat.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
 app.include_router(retrieval.router, prefix="/api/v1")
 app.include_router(hyper_search.router, prefix="/api/v1")
+app.include_router(nodes.router, prefix="/api/v1")
 
 
 @app.get("/")
