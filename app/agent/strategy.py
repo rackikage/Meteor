@@ -3,12 +3,14 @@
 Consults the local Ollama model between scan phases to adapt port selection,
 pivot ordering, and technique based on what has already been discovered.
 
-Memory
-──────
-Strategy decisions and their outcomes are stored in the audit SQLite database.
-On each call the engine loads the last N outcomes and includes them in the
-prompt, creating a feedback loop where the model's recommendations improve over
-successive runs ("meta-learning").
+Behavior Vector (BV)
+────────────────────
+Every scan is fingerprinted into a compact BehaviorVector: host count, service
+types, vuln severity, ports tried.  At decision time the engine finds the top-k
+most similar past BVs from SQLite history, ranks them by reward (intel density
+per port probed), and injects them as in-context examples into the Ollama prompt.
+That is the meta-learning feedback loop — the model sees "for a target like this,
+port set X yielded reward Y" and can generalise.
 
 Graceful degradation
 ────────────────────
@@ -23,7 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields as dc_fields
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -32,11 +34,115 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
-STRATEGY_PROMPT = """\
-You are Meteor's scan strategist. Your job is to decide what to probe next \
-to maximise attack-surface discovery.
+# ── Behavior Vector ──────────────────────────────────────────────────────────
 
-=== PAST OUTCOMES (last {n_history} runs) ===
+@dataclass
+class BehaviorVector:
+    """Compact numerical fingerprint of a scan's context and results.
+
+    Used for meta-learning: past scans with similar BVs are surfaced as
+    in-context examples so the LLM can generalise across target types.
+    """
+    n_hosts: int = 0
+    n_services: int = 0
+    n_criticals: int = 0
+    n_highs: int = 0
+    depth: int = 0
+    ports_tried: int = 0
+    has_ssh: int = 0       # 0 / 1 (bool-as-int for JSON compat)
+    has_http: int = 0
+    has_smb: int = 0
+    has_rdp: int = 0
+    has_db: int = 0        # any db: mysql/postgres/mongo/redis/mssql
+
+    def to_vec(self) -> list[float]:
+        """Normalised float vector for cosine similarity."""
+        return [
+            self.n_hosts     / 10.0,
+            self.n_services  / 20.0,
+            self.n_criticals /  5.0,
+            self.n_highs     / 10.0,
+            self.depth       /  3.0,
+            self.ports_tried / 100.0,
+            float(self.has_ssh),
+            float(self.has_http),
+            float(self.has_smb),
+            float(self.has_rdp),
+            float(self.has_db),
+        ]
+
+    def reward(self) -> float:
+        """Intel density per port probed — the meta-learning reward signal."""
+        if self.ports_tried == 0:
+            return 0.0
+        score = self.n_services + self.n_criticals * 3.0 + self.n_highs * 1.5
+        return round(min(score / self.ports_tried, 10.0), 3)
+
+    def label(self) -> str:
+        """Human-readable summary for prompt injection."""
+        parts = [
+            s for s, flag in [
+                ("SSH", self.has_ssh), ("HTTP", self.has_http),
+                ("SMB", self.has_smb), ("RDP", self.has_rdp), ("DB", self.has_db),
+            ] if flag
+        ]
+        svc_label = "+".join(parts) if parts else "unknown"
+        return (
+            f"{svc_label} | hosts={self.n_hosts} svcs={self.n_services} "
+            f"crit={self.n_criticals} high={self.n_highs} "
+            f"ports_tried={self.ports_tried}"
+        )
+
+
+def bv_from_scan(
+    hosts: list[str],
+    services: list[dict],
+    cves: list[dict],
+    ports: list[int],
+    depth: int,
+) -> BehaviorVector:
+    """Build a BehaviorVector from live scan results."""
+    names = {s.get("name", "").lower() for s in services}
+    db_names = {"mysql", "postgresql", "mongodb", "redis", "mssql", "oracle"}
+    return BehaviorVector(
+        n_hosts=len(set(hosts)),
+        n_services=len(services),
+        n_criticals=sum(1 for c in cves if c.get("severity") == "CRITICAL"),
+        n_highs=sum(1 for c in cves if c.get("severity") == "HIGH"),
+        depth=depth,
+        ports_tried=len(ports),
+        has_ssh=int("ssh" in names),
+        has_http=int(bool({"http", "https", "http-proxy", "https-alt"} & names)),
+        has_smb=int("smb" in names or "netbios" in names),
+        has_rdp=int("rdp" in names),
+        has_db=int(bool(db_names & names)),
+    )
+
+
+def _bv_cosine(a: BehaviorVector, b: BehaviorVector) -> float:
+    """Cosine similarity between two BehaviorVectors (0–1)."""
+    va, vb = a.to_vec(), b.to_vec()
+    dot = sum(x * y for x, y in zip(va, vb))
+    na = sum(x * x for x in va) ** 0.5
+    nb = sum(x * x for x in vb) ** 0.5
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+# ── Strategy types ───────────────────────────────────────────────────────────
+
+STRATEGY_PROMPT = """\
+You are Meteor's scan strategist. Decide what to probe next to maximise \
+attack-surface discovery.
+
+=== BEHAVIOR VECTOR (current target profile) ===
+{bv_label}
+
+=== SIMILAR PAST SCANS (by BV similarity, highest reward first) ===
+{similar_history}
+
+=== RECENT HISTORY (last {n_history} runs) ===
 {history}
 
 === CURRENT FINDINGS ===
@@ -87,20 +193,28 @@ class _Outcome:
     critical_vulns: int
     ports_used: list[int]
     depth: int
+    bv: Optional[BehaviorVector] = None
+    reward: float = 0.0
 
+
+# ── Engine ───────────────────────────────────────────────────────────────────
 
 class StrategyEngine:
     """Queries the free Ollama model to adapt scan strategy from live results.
 
+    Meta-learning loop:
+      1. bv_from_scan() fingerprints the current target state.
+      2. _find_similar() retrieves top-k past BVs by cosine similarity.
+      3. Similar examples (ranked by reward) are injected into the prompt.
+      4. record_outcome() writes this scan's BV + reward to SQLite.
+      5. Next run's decide() picks it up as a training example.
+
     Usage:
         engine = StrategyEngine(model="llama3.2")
-        strategy = await engine.decide(
-            hosts_found=["10.0.0.1"],
-            services=[{"ip": "10.0.0.1", "port": 22, "name": "ssh"}],
-            cves=[{"cve_id": "CVE-2023-0001", "severity": "HIGH"}],
-            depth=1,
-        )
-        # Use strategy.next_ports, strategy.pivot_targets, etc.
+        bv = bv_from_scan(hosts, services, cves, ports, depth)
+        strategy = await engine.decide(hosts, services, cves, depth, bv=bv)
+        # ... run the scan ...
+        engine.record_outcome(hosts, services, criticals, ports, depth, bv=bv)
     """
 
     def __init__(
@@ -115,9 +229,9 @@ class StrategyEngine:
         self._base = base_url
         self._timeout = timeout
         self._history_size = history_size
-        self._storage = storage  # optional SQLiteAdapter for outcome memory
+        self._storage = storage
 
-    # ── Public ───────────────────────────────────────────────────────
+    # ── Public ───────────────────────────────────────────────────────────────
 
     async def decide(
         self,
@@ -125,15 +239,17 @@ class StrategyEngine:
         services: list[dict],
         cves: list[dict],
         depth: int,
+        bv: Optional[BehaviorVector] = None,
     ) -> ScanStrategy:
         """Consult the LLM for next-step recommendations."""
         history = self._load_history()
-        prompt = self._build_prompt(hosts_found, services, cves, depth, history)
+        prompt = self._build_prompt(hosts_found, services, cves, depth, history, bv)
 
         try:
             strategy = await self._call_llm(prompt)
             logger.info(
-                "Strategy [LLM]: %s (ports=%d, pivots=%d)",
+                "Strategy [LLM | bv_reward=%.2f]: %s (ports=%d, pivots=%d)",
+                bv.reward() if bv else 0.0,
                 strategy.reason[:80],
                 len(strategy.next_ports),
                 len(strategy.pivot_targets),
@@ -150,47 +266,69 @@ class StrategyEngine:
         critical_vulns: int,
         ports_used: list[int],
         depth: int,
+        bv: Optional[BehaviorVector] = None,
     ) -> None:
         """Persist a scan outcome so future decisions can learn from it."""
         if self._storage is None:
             return
         try:
             now = datetime.now(timezone.utc).isoformat()
+            reward = bv.reward() if bv else 0.0
+            bv_json = json.dumps(asdict(bv)) if bv else "{}"
             self._storage.execute(
                 """
                 INSERT INTO strategy_outcomes
-                  (timestamp, hosts, services, critical_vulns, ports_json, depth)
-                VALUES (?, ?, ?, ?, ?, ?)
+                  (timestamp, hosts, services, critical_vulns, ports_json,
+                   depth, bv_json, reward)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (now, hosts, services, critical_vulns, json.dumps(ports_used), depth),
+                (now, hosts, services, critical_vulns,
+                 json.dumps(ports_used), depth, bv_json, reward),
                 store="audit",
             )
+            logger.debug("Outcome recorded: reward=%.3f bv=%s", reward,
+                         bv.label() if bv else "none")
         except Exception as e:
             logger.debug("Could not persist strategy outcome: %s", e)
 
     def ensure_table(self) -> None:
-        """Create the strategy_outcomes table if it does not exist."""
+        """Create the strategy_outcomes table (and migrate existing schemas)."""
         if self._storage is None:
             return
         try:
             self._storage.execute(
                 """
                 CREATE TABLE IF NOT EXISTS strategy_outcomes (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp    TEXT NOT NULL,
-                    hosts        INTEGER DEFAULT 0,
-                    services     INTEGER DEFAULT 0,
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp      TEXT NOT NULL,
+                    hosts          INTEGER DEFAULT 0,
+                    services       INTEGER DEFAULT 0,
                     critical_vulns INTEGER DEFAULT 0,
-                    ports_json   TEXT DEFAULT '[]',
-                    depth        INTEGER DEFAULT 0
+                    ports_json     TEXT DEFAULT '[]',
+                    depth          INTEGER DEFAULT 0,
+                    bv_json        TEXT DEFAULT '{}',
+                    reward         REAL DEFAULT 0.0
                 )
                 """,
                 store="audit",
             )
+            # Non-fatal migrations for databases that existed before BV columns
+            for col, coltype, default in [
+                ("bv_json", "TEXT", "'{}'"),
+                ("reward",  "REAL", "0.0"),
+            ]:
+                try:
+                    self._storage.execute(
+                        f"ALTER TABLE strategy_outcomes ADD COLUMN "
+                        f"{col} {coltype} DEFAULT {default}",
+                        store="audit",
+                    )
+                except Exception:
+                    pass  # column already present
         except Exception as e:
             logger.debug("Could not create strategy_outcomes table: %s", e)
 
-    # ── Private ──────────────────────────────────────────────────────
+    # ── Private ──────────────────────────────────────────────────────────────
 
     def _load_history(self) -> list[_Outcome]:
         if self._storage is None:
@@ -198,26 +336,59 @@ class StrategyEngine:
         try:
             rows = self._storage.execute(
                 """
-                SELECT timestamp, hosts, services, critical_vulns, ports_json, depth
+                SELECT timestamp, hosts, services, critical_vulns, ports_json,
+                       depth, bv_json, reward
                 FROM strategy_outcomes
                 ORDER BY id DESC LIMIT ?
                 """,
-                (self._history_size,),
+                (self._history_size * 4,),   # load extra for BV retrieval pool
                 store="audit",
             )
-            return [
-                _Outcome(
+            bv_field_names = {f.name for f in dc_fields(BehaviorVector)}
+            outcomes = []
+            for r in rows:
+                bv: Optional[BehaviorVector] = None
+                try:
+                    bv_data = json.loads(r.get("bv_json") or "{}")
+                    if bv_data:
+                        bv = BehaviorVector(
+                            **{k: v for k, v in bv_data.items()
+                               if k in bv_field_names}
+                        )
+                except Exception:
+                    pass
+                outcomes.append(_Outcome(
                     timestamp=r["timestamp"],
                     hosts=r["hosts"],
                     services=r["services"],
                     critical_vulns=r["critical_vulns"],
                     ports_used=json.loads(r["ports_json"]),
                     depth=r["depth"],
-                )
-                for r in rows
-            ]
+                    bv=bv,
+                    reward=r.get("reward", 0.0),
+                ))
+            return outcomes
         except Exception:
             return []
+
+    @staticmethod
+    def _find_similar(
+        current_bv: BehaviorVector,
+        all_outcomes: list[_Outcome],
+        n: int = 3,
+    ) -> list[_Outcome]:
+        """Return past outcomes whose BV is most similar to the current scan.
+
+        Ranked by (cosine_similarity DESC, reward DESC) so the LLM sees the
+        most relevant AND highest-quality past examples first.
+        """
+        scored = [
+            (_bv_cosine(current_bv, o.bv), o)
+            for o in all_outcomes
+            if o.bv is not None
+        ]
+        scored.sort(key=lambda x: (x[0], x[1].reward), reverse=True)
+        return [o for _, o in scored[:n]]
 
     def _build_prompt(
         self,
@@ -226,18 +397,38 @@ class StrategyEngine:
         cves: list[dict],
         depth: int,
         history: list[_Outcome],
+        current_bv: Optional[BehaviorVector] = None,
     ) -> str:
+        recent = history[: self._history_size]
+
         history_str = "  (no prior runs yet)"
-        if history:
+        if recent:
             lines = []
-            for o in history:
+            for o in recent:
                 lines.append(
                     f"  [{o.timestamp[:10]}] depth={o.depth} "
                     f"hosts={o.hosts} services={o.services} "
-                    f"criticals={o.critical_vulns} "
-                    f"ports={o.ports_used[:8]}{'...' if len(o.ports_used) > 8 else ''}"
+                    f"criticals={o.critical_vulns} reward={o.reward:.2f} "
+                    f"ports={o.ports_used[:6]}{'...' if len(o.ports_used) > 6 else ''}"
                 )
             history_str = "\n".join(lines)
+
+        bv_label = current_bv.label() if current_bv else "(no BV — first run)"
+
+        similar_str = "  (not enough history yet)"
+        if current_bv and history:
+            similar = self._find_similar(current_bv, history, n=3)
+            if similar:
+                lines = []
+                for o in similar:
+                    lbl = o.bv.label() if o.bv else "?"
+                    lines.append(
+                        f"  [{o.timestamp[:10]}] {lbl} | "
+                        f"ports={o.ports_used[:6]}"
+                        f"{'...' if len(o.ports_used) > 6 else ''} "
+                        f"→ reward={o.reward:.2f}"
+                    )
+                similar_str = "\n".join(lines)
 
         svc_str = "\n".join(
             f"  {s.get('ip','?')}:{s.get('port','?')} "
@@ -252,7 +443,9 @@ class StrategyEngine:
         ) or "  (none)"
 
         return STRATEGY_PROMPT.format(
-            n_history=len(history),
+            bv_label=bv_label,
+            similar_history=similar_str,
+            n_history=len(recent),
             history=history_str,
             depth=depth,
             hosts_found=len(hosts),
@@ -282,7 +475,8 @@ class StrategyEngine:
         data = json.loads(raw[start:end])
 
         return ScanStrategy(
-            next_ports=[int(p) for p in data.get("next_ports", []) if 1 <= int(p) <= 65535][:25],
+            next_ports=[int(p) for p in data.get("next_ports", [])
+                        if 1 <= int(p) <= 65535][:25],
             pivot_targets=[str(ip) for ip in data.get("pivot_targets", [])][:10],
             technique=data.get("technique", "connect"),
             priority_services=data.get("priority_services", []),

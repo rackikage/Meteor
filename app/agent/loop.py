@@ -26,7 +26,9 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.agent.web_search import ServiceIntel, WebSearcher
-from app.agent.strategy import StrategyEngine, ScanStrategy, DEFAULT_STRATEGY
+from app.agent.strategy import (
+    BehaviorVector, StrategyEngine, ScanStrategy, DEFAULT_STRATEGY, bv_from_scan,
+)
 from app.graph.event_bus import AssetEventBus
 from app.graph.sqlite_graph import SQLiteAssetGraph
 from app.dispatcher.grinder import InfiltrationGrinder
@@ -153,11 +155,19 @@ class MeteorAgent:
         )
         svc_list = self._collect_services(hosts_q)
 
+        initial_bv = bv_from_scan(
+            hosts=[h["ip"] for h in hosts_q],
+            services=svc_list,
+            cves=[],
+            ports=layer_ports,
+            depth=0,
+        )
         strategy: ScanStrategy = await self._strategy.decide(
             hosts_found=[h["ip"] for h in hosts_q],
             services=svc_list,
-            cves=[],           # no CVEs yet at this phase
+            cves=[],
             depth=0,
+            bv=initial_bv,
         )
         report.strategy_reason = strategy.reason
         report.llm_adapted = strategy.llm_adapted
@@ -230,12 +240,21 @@ class MeteorAgent:
         report.intelligence = intelligence
 
         # ── Phase 3: LLM decides pivot strategy based on full intel ──
+        # Build full BV now that we have CVE data
+        current_bv = bv_from_scan(
+            hosts=[h["ip"] for h in hosts_q],
+            services=svc_list,
+            cves=all_cves,
+            ports=layer_ports,
+            depth=depth,
+        )
         if depth > 1 and report.hosts_discovered > 0:
             pivot_strategy = await self._strategy.decide(
                 hosts_found=[h["ip"] for h in hosts_q],
                 services=svc_list,
                 cves=all_cves,
                 depth=1,
+                bv=current_bv,
             )
             report.strategy_reason = pivot_strategy.reason
             report.llm_adapted = pivot_strategy.llm_adapted
@@ -289,6 +308,7 @@ class MeteorAgent:
             critical_vulns=report.critical_vulns,
             ports_used=layer_ports,
             depth=depth,
+            bv=current_bv,
         )
 
         report.wall_time_ms = (time.monotonic() - t0) * 1000

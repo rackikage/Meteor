@@ -212,7 +212,7 @@ class InfiltrationGrinder:
         """Scan a single host and count discoveries."""
         try:
             results = await self._scanner.scan_host(ip, ports)
-            open_count = sum(1 for r in results if isinstance(r, object) and getattr(r, "open", False))
+            open_count = sum(1 for r in results if getattr(r, "open", False))
             self._stats.tasks_completed += 1
             self._stats.services_discovered += open_count
 
@@ -243,11 +243,7 @@ class InfiltrationGrinder:
         noise_task = asyncio.create_task(self._noise.start()) if not self._noise._task else None
 
         try:
-            async with asyncio.TaskGroup() as tg:
-                for t in tasks:
-                    tg.create_task(_bounded(t))
-        except* Exception:
-            pass
+            await asyncio.gather(*[_bounded(t) for t in tasks], return_exceptions=True)
         finally:
             if noise_task:
                 await self._noise.stop()

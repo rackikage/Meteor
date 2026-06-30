@@ -81,7 +81,8 @@ async def claim_task(node_id: str):
 
 @router.post("/nodes/result")
 async def post_result(payload: ResultPayload):
-    ok = _ctrl().complete_task(payload.task_id, payload.dict())
+    data = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+    ok = _ctrl().complete_task(payload.task_id, data)
     if not ok:
         raise HTTPException(status_code=404, detail="Unknown task")
     return {"status": "accepted"}
