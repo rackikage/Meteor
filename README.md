@@ -33,9 +33,9 @@ Second launch just opens it. No browser tab, no downloads unless you ask.
 - **macOS** → builds `~/Applications/Meteor.app`.
 - **Windows** → Start Menu + Desktop shortcuts (run the PowerShell installer).
 
-> Linux native window needs a WebView backend once:
+> Linux native window uses PyQt6 WebEngine (installed automatically by pip).
+> No `sudo` needed. If you prefer GTK/WebKit2:
 > `sudo apt install python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0`
-> (Debian/Ubuntu/Kali). Qt works too: `python3-pyqt6 python3-pyqt6.qtwebengine`.
 
 ## The engine
 

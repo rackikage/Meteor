@@ -77,6 +77,7 @@ def main() -> None:
 
     _wait_for_health(url, timeout_s=25.0)
 
+    os.environ.setdefault("QT_API", "pyqt6")
     import webview  # native window
 
     icon = HERE / "assets" / "meteor_icon_256.png"
@@ -86,7 +87,7 @@ def main() -> None:
         width=1280,
         height=860,
         min_size=(760, 540),
-        background_color="#000000",
+        background_color="#0d0d0d",
         resizable=True,
         text_select=True,
         zoomable=True,
@@ -98,10 +99,11 @@ def main() -> None:
     gui = os.environ.get("METEOR_WEBVIEW_GUI")  # "gtk" | "qt" | None
     if not gui and sys.platform.startswith("linux"):
         try:
-            import gi  # noqa: F401
+            import gi
+            gi.require_version("WebKit2", "4.1")
             gui = "gtk"
         except Exception:
-            gui = None
+            gui = "qt"
     webview.start(
         gui=gui,
         icon=str(icon) if icon.exists() else None,

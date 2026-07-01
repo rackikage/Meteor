@@ -71,7 +71,8 @@ def _ensure_venv() -> None:
         _run(sys.executable, "-m", "venv", str(VENV))
         _run(str(PIP), "install", "--quiet", "--upgrade", "pip", "setuptools")
         _run(str(PIP), "install", "--quiet", "-e", str(HERE))
-        _run(str(PIP), "install", "--quiet", "pywebview", "pillow")
+        _run(str(PIP), "install", "--quiet", "pywebview", "pillow",
+             "qtpy", "PyQt6", "PyQt6-WebEngine")
 
     _link_system_site_packages()
 
