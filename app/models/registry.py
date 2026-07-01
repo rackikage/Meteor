@@ -8,6 +8,7 @@ adapter implementation based on the profile's backend type. Adding a new backend
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +16,16 @@ from app.config import MeteorConfig, ModelProfile
 from app.models.contract import ModelAdapter
 
 logger = logging.getLogger(__name__)
+
+
+_OPENAI_COMPATIBLE_BACKENDS = {"groq", "cerebras", "openrouter", "together", "gemini_openai"}
+_BACKEND_KEY_ENV = {
+    "groq": "GROQ_API_KEY",
+    "cerebras": "CEREBRAS_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "gemini_openai": "GEMINI_API_KEY",
+}
 
 
 class ModelRegistry:
@@ -27,10 +38,12 @@ class ModelRegistry:
 
     def get_adapter(self, profile_name: Optional[str] = None) -> ModelAdapter:
         """Get or build a model adapter for the given profile.
-        If profile_name is None, uses the default profile from config.
+        If profile_name is None, uses the effective default profile — which
+        auto-upgrades to the fastest available hosted profile when its API key
+        is present in the environment.
         """
         if profile_name is None:
-            profile_name = self.config.models.default_profile
+            profile_name = self._effective_default_profile()
 
         if profile_name in self._adapters:
             return self._adapters[profile_name]
@@ -43,6 +56,32 @@ class ModelRegistry:
         self._adapters[profile_name] = adapter
         logger.info("Built adapter for profile: %s (backend=%s)", profile_name, profile.backend)
         return adapter
+
+    def _effective_default_profile(self) -> str:
+        """Prefer a hosted-free profile if its API key is set; else config default.
+
+        Priority: Groq (fastest) → Cerebras → Gemini → Together → OpenRouter → config default.
+        """
+        priority = ("groq", "cerebras", "gemini_openai", "together", "openrouter")
+        for backend in priority:
+            env_var = _BACKEND_KEY_ENV[backend]
+            if not os.environ.get(env_var, "").strip():
+                continue
+            # Prefer a profile flagged role="fast" on that backend, else any profile on it.
+            fast_pick = None
+            any_pick = None
+            for name, prof in self.config.models.profiles.items():
+                if prof.backend.lower() != backend:
+                    continue
+                if prof.role == "fast" and fast_pick is None:
+                    fast_pick = name
+                elif any_pick is None:
+                    any_pick = name
+            picked = fast_pick or any_pick
+            if picked:
+                logger.info("Auto-selected hosted default profile: %s (%s key present)", picked, env_var)
+                return picked
+        return self.config.models.default_profile
 
     def resolve_for_request(self, metadata: Optional[dict] = None) -> ModelAdapter:
         """Route simple tasks to a fast profile; complex ops to default/heavy."""
@@ -74,6 +113,10 @@ class ModelRegistry:
         elif backend == "ollama":
             from app.models.ollama_adapter import build_ollama_adapter
             return build_ollama_adapter(profile)
+
+        elif backend in _OPENAI_COMPATIBLE_BACKENDS:
+            from app.models.groq_adapter import build_openai_compatible_adapter
+            return build_openai_compatible_adapter(profile, backend)
 
         elif backend in ("openai", "anthropic", "remote"):
             raise NotImplementedError(

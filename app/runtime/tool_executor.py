@@ -120,6 +120,15 @@ class ToolExecutor:
         "browser.fill": ("fill_field", ["selector", "value"], "Fill a form field"),
         "browser.click": ("click_element", ["selector"], "Click an element"),
         "browser.js": ("execute_js", ["script"], "Run JS in browser"),
+        "nmap.scan": ("scan", ["target"], "Nmap TCP scan (default top 1000 ports)"),
+        "nmap.service_version": ("service_version", ["target"], "Nmap -sV service/version detection"),
+        "nmap.discover": ("discover", ["cidr"], "Nmap host discovery on a CIDR"),
+        "nmap.script": ("script", ["target", "script"], "Nmap NSE script run (e.g. vuln, default)"),
+        "pentest.kernel_posture": ("kernel_posture", [], "Local kernel/sysctl firewall posture"),
+        "pentest.firewall_analyze": ("firewall_analyze", [], "Graph-based perimeter exposure"),
+        "pentest.probe": ("probe", ["target"], "Async TCP probe engine"),
+        "pentest.posture": ("posture", [], "Combined kernel + graph firewall posture"),
+        "network.scope": ("scope", [], "Discover local gateway, CIDR, and priority targets"),
     }
 
     def __init__(self, budget: Optional[SignalBudget] = None) -> None:

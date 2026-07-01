@@ -131,6 +131,11 @@ class MeteorRuntime:
             retrieval=self.retrieval,
             evidence_tracker=self.evidence,
         )
+        # Register every system tool with permissive local ownership
+        # (nmap, full shell, full filesystem, pentest, network scope) and seed
+        # allow-* SQL policy rules so the orchestrator's tool loop can execute.
+        from app.tools.bootstrap import bootstrap_tools
+        bootstrap_tools(storage=self.storage)
         self.tool_executor = ToolExecutor()
         self.orchestrator = MeteorOrchestrator(
             policy=self.policy,

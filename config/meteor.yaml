@@ -5,8 +5,56 @@ app:
   debug: false
 
 models:
+  # Effective default is auto-upgraded to a hosted-free profile when its API key
+  # is set (GROQ_API_KEY, CEREBRAS_API_KEY, GEMINI_API_KEY, TOGETHER_API_KEY,
+  # OPENROUTER_API_KEY). No key present → falls back to the local Ollama default
+  # below. This keeps Meteor local-first by default, fast-when-you-plug-in.
   default_profile: ollama-heavy
   profiles:
+    groq-instant:
+      backend: groq
+      model_path: "llama-3.1-8b-instant"
+      context_window: 131072
+      temperature: 0.7
+      temperature_structured: 0.2
+      temperature_creative: 0.8
+      max_tokens: 2048
+      wired: true
+      base_url: "https://api.groq.com/openai/v1"
+      role: fast
+    groq-versatile:
+      backend: groq
+      model_path: "llama-3.3-70b-versatile"
+      context_window: 131072
+      temperature: 0.7
+      temperature_structured: 0.2
+      temperature_creative: 0.8
+      max_tokens: 4096
+      wired: true
+      base_url: "https://api.groq.com/openai/v1"
+      role: heavy
+    cerebras-fast:
+      backend: cerebras
+      model_path: "llama-3.3-70b"
+      context_window: 65536
+      temperature: 0.7
+      temperature_structured: 0.2
+      temperature_creative: 0.8
+      max_tokens: 4096
+      wired: true
+      base_url: "https://api.cerebras.ai/v1"
+      role: fast
+    gemini-flash:
+      backend: gemini_openai
+      model_path: "gemini-2.0-flash-exp"
+      context_window: 1048576
+      temperature: 0.7
+      temperature_structured: 0.2
+      temperature_creative: 0.9
+      max_tokens: 4096
+      wired: true
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
+      role: heavy
     ollama-heavy:
       backend: ollama
       model_path: "llama3.1:8b"
