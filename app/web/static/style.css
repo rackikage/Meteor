@@ -353,3 +353,43 @@ body {
   box-shadow: 0 0 16px rgba(255, 85, 119, 0.35);
 }
 .confirm-btn.run:hover { box-shadow: 0 0 24px rgba(255, 85, 119, 0.55); }
+
+/* ── Copy buttons ────────────────────────────────────────────────── */
+.copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s, background 0.15s;
+  z-index: 2;
+}
+.msg .bubble:hover .copy-btn,
+.msg .bubble pre:hover + .copy-btn,
+pre:hover .copy-btn { opacity: 1; }
+.copy-btn:hover {
+  color: var(--accent-hi);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.copy-btn.copied {
+  color: var(--success);
+  border-color: var(--success);
+  background: rgba(102, 224, 164, 0.1);
+}
+.msg .bubble { position: relative; }
+.msg .bubble pre { position: relative; }
+
+/* Keep copy buttons visible on touch devices (no hover) */
+@media (hover: none) {
+  .copy-btn { opacity: 0.6; }
+}

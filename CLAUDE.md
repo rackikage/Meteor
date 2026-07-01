@@ -1,6 +1,21 @@
-# Meteor — local-first AI runtime
+# Meteor — architecture reference
 
-**Identity**: Meteor IS the model. Not a wrapper, not an nmap frontend. Underlying engines (Pollinations/Groq/Ollama) are implementation details — `/api/v1/agent/model` already returns `"model": "Meteor"`. Everything in the repo should treat nmap/pentest as just capabilities among many, not the identity.
+Meteor is a local-first AI runtime: a single agentic chat loop on the user's own
+machine with a permissive local policy (full shell, filesystem, networking, recon,
+desktop integration). "Meteor is the model" — a web GUI drives a tool-using loop
+backed by hosted keyless/free models with local Ollama fallback.
+
+## Conventions
+- Python 3.11+, `from __future__ import annotations`
+- Tools: `bootstrap_tools()` registers, `ToolExecutor.CAPABILITIES` maps tool→method→params
+- Model profiles: `config/meteor.yaml` + `_OPENAI_COMPATIBLE_BACKENDS` in registry.py
+- Adapter pattern: `complete()` + `stream()` + `health()` — see `contract.py`
+- Policy: allow-all SQL seeded at priority 0, `auto_approve("*:*")` in bootstrap
+- Signal budget: 1000 max, 50/min refill, scores ≤10 are silent (free)
+- Max iterations: 12 in `AgentTurn`
+- Import test: `python -c "from app.bootstrap import bootstrap; r = bootstrap()"`
+- Run full suite: `./.venv/bin/python -m pytest -q`
+- Repo: `origin` = `https://github.com/rackikage/Meteor.git`, branch `main`
 
 ## Architecture map
 
@@ -9,49 +24,40 @@ User prompt → web/static/app.js (SSE) → POST /api/v1/agent/chat (agent.py)
   → AgentChatLoop.run() (chatbot_loop.py)
     → model.complete() — via ModelRegistry.get_adapter() (registry.py)
       → groq_adapter.py / ollama_adapter.py — OpenAI-compat or local
-    → _parse_tool_call() — JSON block or TOOL: syntax
+    → _parse_tool_calls() — JSON object or array [{tool, operation, params}, ...]
     → ToolExecutor.execute() (tool_executor.py)
-      → policy check (registry.py policy table)
-      → budget check (signal_budget.py)
-      → _invoke_tool() → subprocess/async probe
-    → result fed back to model → loop until final answer
+      → policy check → budget check → _invoke_tool()
+    → results fed back to model → loop until final answer
 ```
 
-**Key files by role:**
-- `chatbot_loop.py:95-180` — agent loop, system prompt, tool parsing, 6-iter cap
-- `tool_executor.py:76-267` — CAPABILITIES dict, 4-gate execution, tool dispatch
-- `bootstrap.py:128-191` — registers all tools permissively (no blocklist, allow-all SQL)
-- `registry.py:39-58` — model adapter factory, priority fallback chain
-- `agent.py:35-102` — web SSE endpoint, in-memory session history
-- `probe_engine.py:77-166` — async TCP probe engine (concurrent, banner grab)
-- `groq_adapter.py` — OpenAI-compat adapter, handles keyless Pollinations backend
-- `config/meteor.yaml` — model profiles (pollinations-free, groq-fast, ollama-heavy, etc.)
-- `run.py` — launcher: venv create, dep install, uvicorn start on :8765
+Key files:
+- `chatbot_loop.py` — agent loop, system prompt (`_tool_manual` advertises every
+  capability), tool parsing, 12-iter cap
+- `tool_executor.py` — `CAPABILITIES` dict, 4-gate execution (validate → policy →
+  budget → invoke)
+- `app/tools/bootstrap.py` — `bootstrap_tools()` registers every tool permissively
+  (filesystem widened to `/`, shell with no blocklist, nmap/pentest/network/web)
+- `registry.py` — model adapter factory, priority fallback
+- `agent.py` — web SSE endpoint, in-memory session history
+- `groq_adapter.py` — OpenAI-compat with retry + keyless backends
+- `probe_engine.py` — async TCP probe (concurrent, banner grab)
+- `raw_scanner.py` — stateless SYN scanner (root required)
+- `web_search.py` — DuckDuckGo/NVD/Exploit-DB searcher, wrapped by `WebIntelTool`
+  in `bootstrap.py` and exposed as `web.search/cves/exploits/research`
+- `grinder.py` — autonomous infiltration engine (NOT wired into the agent loop)
+- `config/meteor.yaml` — model profiles (default `pollinations-free`, keyless)
+- `run.py` — launcher: uvicorn on :8765
 
-**Conventions:**
-- Python 3.11+, no type stubs needed, use `from __future__ import annotations`
-- Tools register via `bootstrap_tools()`, capabilities via `ToolExecutor.CAPABILITIES`
-- New model backends: add to `_OPENAI_COMPATIBLE_BACKENDS` in registry.py + profile in meteor.yaml
-- Shell uses `ShellSandbox.run_sync()` for sync, `run()` for async — bootstrap wires `shell.run` to `run_sync`
-- Policy: allow-all SQL seeded at priority 0, `auto_approve("*:*")` called in bootstrap
-- Signal budget: 1000 max, 50/min refill, scores ≤10 are silent (free), default unknown tool score = 10
-
-## What to do now
-
-The user wants Meteor positioned as a general-purpose AI runtime. Take these in order:
-
-1. **Tool chaining** — `_parse_tool_call()` only handles single JSON blocks. Make it accept arrays `[{...},{...}]` so the model can request 2+ tools per turn. Execute sequentially, feed all results back together.
-
-2. **Parallel execution** — group independent tool calls from a chained turn and run via `asyncio.gather`. `probe_engine.py` already has the pattern — `execute_batch()` on line 154.
-
-3. **Model failover** — `get_adapter()` in registry.py picks one profile and dies. Add a fallback loop: try primary, catch on first `complete()` failure, try next profile in priority order. Test with `from app.bootstrap import bootstrap; r = bootstrap()`.
-
-4. **Make tools feel like "Meteor"** — update the system prompt in `chatbot_loop.py:73-92` so it introduces itself as "I'm Meteor" not "I am a tool-using assistant running on your machine". Rephrase the capabilities list to sound like native abilities, not a plugin catalog.
-
-5. **Increase max_iterations** — bump from 6 to 12 in `AgentTurn` default and the web endpoint. Complex scan→probe→analyze→report chains need the headroom. Budget gates it anyway.
-
-## Critical — fully implemented but not wired
-
-**`app/agent/web_search.py`** contains a complete WebSearcher class (284 lines) with NVD CVE lookup, Exploit-DB search, DuckDuckGo scraping, and offline mock fallback data. This is **not registered as a tool capability** — the model cannot call `web.search_cves` or `web.search_exploit`. Adding it to CAPABILITIES and bootstrap would give Meteor live intel gathering without any new dependencies (httpx + beautifulsoup4 already in pyproject.toml).
-
-**Registry fallback skips Pollinations** — `_effective_default_profile()` in registry.py loops `_BACKEND_KEY_ENV` (groq, cerebras, gemini_openai, together, openrouter) checking for API keys. Pollinations is keyless so it never appears in that loop. When no API key is set, the code falls back to `ollama-heavy` (config default), completely skipping `pollinations-free` which should be the always-available free fallback.
+## Known gaps / backlog
+- **Model failover** — `registry.py:get_adapter()` picks one profile; no
+  cross-backend Pollinations → Groq → Cerebras → Ollama chain yet (Groq retries
+  internally only).
+- **`grinder.py` not wired** — full AssetGraph → Grinder → Scanner → EventBus
+  pipeline exists but is not exposed to the agent loop or CAPABILITIES.
+- **No diff-based file editing** — only `filesystem.write` (whole-file rewrite);
+  no `filesystem.edit {path, old_string, new_string}`.
+- **No iterative code-execution loop** — one-shot shell only.
+- **Context window** — long tool chains exceed free-model 8K contexts; old tool
+  results should be summarized/compressed.
+- **Persistence** — session history is in-memory (`_SESSIONS` in `agent.py`);
+  dies on restart.

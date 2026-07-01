@@ -153,6 +153,51 @@ function renderMarkdown(bubble, text) {
   });
 }
 
+// ── Copy to clipboard ──────────────────────────────────────────────
+function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  ta.style.top = "-9999px";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try { document.execCommand("copy"); } catch (_) {}
+  document.body.removeChild(ta);
+}
+
+function attachCopyButton(container, text) {
+  const tpl = document.getElementById("copy-btn-tpl");
+  if (!tpl) return;
+  const btn = tpl.content.firstElementChild.cloneNode(true);
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    copyToClipboard(text);
+    btn.classList.add("copied");
+    setTimeout(() => btn.classList.remove("copied"), 1200);
+  });
+  container.style.position = container.style.position || "relative";
+  container.appendChild(btn);
+  return btn;
+}
+
+function attachCopyToCodeBlocks(bubble) {
+  bubble.querySelectorAll("pre").forEach((pre) => {
+    if (pre.querySelector(".copy-btn")) return;
+    const text = pre.textContent || "";
+    attachCopyButton(pre, text);
+  });
+}
+
 // ── SSE agent send ─────────────────────────────────────────────────
 async function send() {
   const prompt = input.value.trim();
@@ -201,7 +246,11 @@ async function send() {
     addTrace("error", err.message || String(err), "error");
   } finally {
     assistantBubble.classList.remove("streaming");
-    if (finalText) renderMarkdown(assistantBubble, finalText);
+    if (finalText) {
+      renderMarkdown(assistantBubble, finalText);
+      attachCopyToCodeBlocks(assistantBubble);
+      attachCopyButton(assistantBubble, finalText);
+    }
     sendBtn.disabled = false;
     input.focus();
     scrollBottom();
