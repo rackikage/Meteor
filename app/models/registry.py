@@ -18,7 +18,7 @@ from app.models.contract import ModelAdapter
 logger = logging.getLogger(__name__)
 
 
-_OPENAI_COMPATIBLE_BACKENDS = {"groq", "cerebras", "openrouter", "together", "gemini_openai"}
+_OPENAI_COMPATIBLE_BACKENDS = {"groq", "cerebras", "openrouter", "together", "gemini_openai", "pollinations"}
 _BACKEND_KEY_ENV = {
     "groq": "GROQ_API_KEY",
     "cerebras": "CEREBRAS_API_KEY",

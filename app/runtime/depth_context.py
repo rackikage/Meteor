@@ -1,4 +1,4 @@
-"""Depth-controlled context building for multi-step infiltration ops."""
+"""Depth-controlled context building for multi-step agent ops."""
 
 from __future__ import annotations
 

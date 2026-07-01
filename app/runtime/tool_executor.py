@@ -129,6 +129,10 @@ class ToolExecutor:
         "pentest.probe": ("probe", ["target"], "Async TCP probe engine"),
         "pentest.posture": ("posture", [], "Combined kernel + graph firewall posture"),
         "network.scope": ("scope", [], "Discover local gateway, CIDR, and priority targets"),
+        "web.search": ("search", ["query"], "General web search (DuckDuckGo)"),
+        "web.cves": ("cves", ["service"], "Look up CVEs for a service/banner (NVD)"),
+        "web.exploits": ("exploits", ["service"], "Search Exploit-DB for a service/banner"),
+        "web.research": ("research", ["ip", "port", "service"], "Full service intel: CVEs + exploits + web hits"),
     }
 
     def __init__(self, budget: Optional[SignalBudget] = None) -> None:

@@ -64,8 +64,10 @@ def test_registry_get_adapter_raises_on_missing_model_file() -> None:
 def test_model_profile_has_required_fields() -> None:
     config = MeteorConfig.load(CONFIG_PATH)
     profile = config.models.profiles[config.models.default_profile]
-    assert profile.backend in ("llama_cpp", "ollama")
-    assert profile.model_path.endswith(".gguf") or profile.backend == "ollama"
+    hosted = ("pollinations", "groq", "cerebras", "gemini_openai", "together", "openrouter")
+    assert profile.backend in ("llama_cpp", "ollama", *hosted)
+    # Local llama_cpp needs a .gguf path; ollama/hosted just name a model.
+    assert profile.model_path.endswith(".gguf") or profile.backend != "llama_cpp"
     assert profile.context_window > 0
     assert 0.0 <= profile.temperature <= 2.0
     assert profile.max_tokens > 0

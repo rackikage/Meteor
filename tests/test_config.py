@@ -32,7 +32,8 @@ def test_config_policy_default_action_is_deny() -> None:
 def test_config_model_profile_has_required_fields() -> None:
     config = MeteorConfig.load(CONFIG_PATH)
     profile = config.models.profiles[config.models.default_profile]
-    assert profile.backend in ("llama_cpp", "ollama")
-    assert profile.model_path.endswith(".gguf") or profile.backend == "ollama"
+    hosted = ("pollinations", "groq", "cerebras", "gemini_openai", "together", "openrouter")
+    assert profile.backend in ("llama_cpp", "ollama", *hosted)
+    assert profile.model_path.endswith(".gguf") or profile.backend != "llama_cpp"
     assert isinstance(profile.context_window, int)
     assert profile.wired is True

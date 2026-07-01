@@ -9,8 +9,33 @@ models:
   # is set (GROQ_API_KEY, CEREBRAS_API_KEY, GEMINI_API_KEY, TOGETHER_API_KEY,
   # OPENROUTER_API_KEY). No key present → falls back to the local Ollama default
   # below. This keeps Meteor local-first by default, fast-when-you-plug-in.
-  default_profile: ollama-heavy
+  # Keyless free hosted API works out of the box on any wifi — no signup.
+  # Auto-upgrades to Groq/Cerebras/Gemini if you set the matching API key.
+  default_profile: pollinations-free
   profiles:
+    # ── Keyless free hosted (Pollinations) ────────────────────────────
+    pollinations-free:
+      backend: pollinations
+      model_path: "openai-fast"       # gpt-4o-mini class, no key required
+      context_window: 32768
+      temperature: 0.6
+      temperature_structured: 0.2
+      temperature_creative: 0.85
+      max_tokens: 2048
+      wired: true
+      base_url: "https://text.pollinations.ai/openai"
+      role: fast
+    pollinations-smart:
+      backend: pollinations
+      model_path: "openai-large"      # larger free tier model
+      context_window: 65536
+      temperature: 0.5
+      temperature_structured: 0.2
+      temperature_creative: 0.85
+      max_tokens: 4096
+      wired: true
+      base_url: "https://text.pollinations.ai/openai"
+      role: heavy
     groq-instant:
       backend: groq
       model_path: "llama-3.1-8b-instant"
@@ -55,25 +80,28 @@ models:
       wired: true
       base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
       role: heavy
+    # Slow-but-smart local model. Selected via the GUI "smart" toggle.
     ollama-heavy:
       backend: ollama
-      model_path: "llama3.1:8b"
-      context_window: 8192
-      temperature: 0.7
-      temperature_structured: 0.2
-      temperature_creative: 0.8
-      max_tokens: 1024
+      model_path: "qwen2.5-coder:32b"
+      context_window: 32768
+      temperature: 0.4
+      temperature_structured: 0.15
+      temperature_creative: 0.7
+      max_tokens: 2048
       wired: true
       base_url: "http://localhost:11434"
       role: heavy
+    # Blazing-fast local model. Default. 7B code-tuned; ~80–100 tok/s on modern
+    # hardware and still capable at agentic tool use.
     ollama-fast:
       backend: ollama
-      model_path: "llama3.2"
-      context_window: 4096
-      temperature: 0.5
-      temperature_structured: 0.2
-      temperature_creative: 0.75
-      max_tokens: 512
+      model_path: "qwen2.5-coder:7b"
+      context_window: 8192
+      temperature: 0.4
+      temperature_structured: 0.15
+      temperature_creative: 0.7
+      max_tokens: 1024
       wired: true
       base_url: "http://localhost:11434"
       role: fast

@@ -106,6 +106,49 @@ class PentestTool:
         return {"healthy": True, "backend": "pentest"}
 
 
+class WebIntelTool:
+    """Live web intel — CVE lookup (NVD), Exploit-DB search, and general web
+    search. Wraps the async WebSearcher with sync entry points so the model can
+    call it like any other tool."""
+
+    def __init__(self) -> None:
+        from app.agent.web_search import WebSearcher
+        self._searcher = WebSearcher()
+
+    @staticmethod
+    def _run(coro):
+        import asyncio
+        from dataclasses import asdict, is_dataclass
+
+        def _conv(obj):
+            if is_dataclass(obj):
+                return asdict(obj)
+            if isinstance(obj, list):
+                return [_conv(o) for o in obj]
+            return obj
+
+        result = asyncio.run(coro)
+        return _conv(result)
+
+    def search(self, query: str) -> dict:
+        hits = self._run(self._searcher._web_search(str(query)))
+        return {"query": query, "hits": hits}
+
+    def cves(self, service: str, banner: str = "") -> dict:
+        entries = self._run(self._searcher._search_cves(str(service), str(banner)))
+        return {"service": service, "cves": entries}
+
+    def exploits(self, service: str, banner: str = "") -> dict:
+        matches = self._run(self._searcher._search_exploits(str(service), str(banner)))
+        return {"service": service, "exploits": matches}
+
+    def research(self, ip: str, port: int, service: str, banner: str = "") -> dict:
+        return self._run(self._searcher.research_service(str(ip), int(port), str(service), str(banner)))
+
+    def health(self) -> dict:
+        return {"healthy": True, "backend": "web_intel"}
+
+
 class NetworkScopeTool:
     """Local network scope discovery — gateway, CIDR, priority targets."""
 
@@ -179,6 +222,10 @@ def bootstrap_tools(storage: Any = None) -> SystemToolRegistry:
     registry.register("nmap", NmapTool(), "Nmap TCP/host discovery/service/NSE", version="1.0")
     registry.register("pentest", PentestTool(), "Kernel/firewall posture and probe engine", version="1.0")
     registry.register("network", NetworkScopeTool(), "Local network scope (gateway/CIDR)", version="1.0")
+    try:
+        registry.register("web", WebIntelTool(), "Live web intel — CVE/NVD, Exploit-DB, web search", version="1.0")
+    except Exception as exc:
+        logger.info("Web intel tool unavailable: %s", exc)
 
     # 6. Approval hooks — user owns the machine; auto-approve everything.
     registry.auto_approve("*:*")

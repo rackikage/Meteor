@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meteor</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">☄</span>
+    <span class="brand-name">Meteor</span>
+  </div>
+  <div class="topbar-right">
+    <div class="mode-toggle" role="tablist" aria-label="Model speed">
+      <button id="mode-fast" class="mode-btn active" data-role="fast" role="tab">fast</button>
+      <button id="mode-smart" class="mode-btn" data-role="heavy" role="tab">smart</button>
+    </div>
+    <span id="model-badge" class="model-badge" title="Active model">…</span>
+    <button id="btn-tools" class="chip-btn" title="List registered tools">tools</button>
+    <button id="btn-clear" class="chip-btn" title="Clear conversation">clear</button>
+  </div>
+</header>
+
+<main id="chat" class="chat">
+  <div class="welcome">
+    <div class="welcome-mark">☄</div>
+    <div class="welcome-title">Meteor</div>
+    <div class="welcome-sub">Local-first agentic AI · runs anything on your machine · shell, files, network, recon</div>
+  </div>
+</main>
+
+<footer class="composer">
+  <div class="composer-inner">
+    <textarea id="input" rows="1" placeholder="Message Meteor…" autofocus></textarea>
+    <button id="send" class="send-btn" title="Send (Enter)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 12L20 4L12 20L10 14L4 12Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+  <div class="composer-hint">Enter to send · Shift+Enter for newline</div>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

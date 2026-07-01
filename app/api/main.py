@@ -13,8 +13,10 @@ from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
-from app.api.v1.endpoints import chat, health, hyper_search, memory, retrieval, nodes, pentest
+from app.api.v1.endpoints import agent, chat, health, hyper_search, memory, retrieval, nodes, pentest
 from app.agent.loop import MeteorAgent
 from app.agent.strategy import StrategyEngine
 from app.node.controller import NodeController
@@ -317,15 +319,37 @@ app.include_router(retrieval.router, prefix="/api/v1")
 app.include_router(hyper_search.router, prefix="/api/v1")
 app.include_router(nodes.router, prefix="/api/v1")
 app.include_router(pentest.router, prefix="/api/v1")
+app.include_router(agent.router, prefix="/api/v1")
 
+# ── Web chat UI ─────────────────────────────────────────────────────
+# Serve the OLED-black + silver ChatGPT-style single-page app.
+_WEB_DIR = Path(__file__).resolve().parent.parent / "web" / "static"
+if _WEB_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(_WEB_DIR)), name="static")
 
-@app.get("/")
-async def root():
-    """Root endpoint — API info."""
-    return {
-        "name": "Meteor API",
-        "version": "1.0.0",
-        "description": "Local-first AI runtime",
-        "docs": "/docs",
-        "health": "/api/v1/health",
-    }
+    @app.get("/")
+    async def root():
+        """Serve the chat UI."""
+        return FileResponse(str(_WEB_DIR / "index.html"))
+
+    @app.get("/api")
+    async def api_info():
+        return {
+            "name": "Meteor API",
+            "version": "1.0.0",
+            "description": "Local-first AI runtime",
+            "docs": "/docs",
+            "chat": "/",
+            "health": "/api/v1/health",
+        }
+else:
+    @app.get("/")
+    async def root():
+        """Root endpoint — API info."""
+        return {
+            "name": "Meteor API",
+            "version": "1.0.0",
+            "description": "Local-first AI runtime",
+            "docs": "/docs",
+            "health": "/api/v1/health",
+        }

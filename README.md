@@ -2,10 +2,15 @@
 
 > Local-first agentic AI. Your machine. Your rules. Your tools.
 
-Meteor is a home-made AI runtime that runs on your box with full permissions —
-shell, filesystem, `nmap`, pentest tooling, network scope — and drives them
-through an agent loop, Claude Code / OpenCode style. Local-first by default,
-speed-first when you plug in a free hosted model.
+Meteor is a home-made AI runtime that runs on your box as a **native desktop
+app** with full local permissions — shell, filesystem, processes, networking,
+recon, and desktop integration — and drives them through a Claude Code-style
+agent loop. It talks to you as a single model called **Meteor**; the engine
+behind it is swappable and invisible.
+
+Works out of the box on any wifi with **zero setup and no API key** (keyless
+free hosted inference), and can drop to a fully offline local model when you
+want it.
 
 ## Quick start
 
@@ -15,87 +20,92 @@ cd Meteor
 ./Meteor
 ```
 
-That's it. First launch creates `.venv`, installs deps, downloads the bundled
-Chromium for web tools, and opens the chat GUI. Second launch just opens it.
+First launch creates `.venv`, installs deps, and opens the native window.
+Second launch just opens it. No browser tab, no downloads unless you ask.
 
-**Windows:** double-click `Meteor.bat`.
-**Linux desktop:** copy `Meteor.desktop` to `~/.local/share/applications/`.
-**macOS:** `./scripts/install_meteor_app.sh` → pin `~/Applications/Meteor.app` to the Dock.
+**Install as a real app** (menu + taskbar icon):
+
+```bash
+./install.sh
+```
+
+- **Linux** → registers `meteor.desktop` + icons, then pin from your taskbar.
+- **macOS** → builds `~/Applications/Meteor.app`.
+- **Windows** → Start Menu + Desktop shortcuts (run the PowerShell installer).
+
+> Linux native window needs a WebView backend once:
+> `sudo apt install python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0`
+> (Debian/Ubuntu/Kali). Qt works too: `python3-pyqt6 python3-pyqt6.qtwebengine`.
 
 ## The engine
 
-Meteor picks its model by looking at your environment:
+You never pick a model — you talk to **Meteor**. Under the hood it auto-selects
+the fastest backend available to you:
 
-| If this is set             | Meteor uses                          | Why                        |
-|----------------------------|---------------------------------------|----------------------------|
-| `GROQ_API_KEY`             | `llama-3.1-8b-instant` on Groq        | ~750 tok/s free tier       |
-| `CEREBRAS_API_KEY`         | `llama-3.3-70b` on Cerebras           | Very fast 70B free tier    |
-| `GEMINI_API_KEY`           | `gemini-2.0-flash-exp`                | Large context, free        |
-| `TOGETHER_API_KEY`         | Together AI                           | Fallback hosted            |
-| `OPENROUTER_API_KEY`       | OpenRouter                            | Aggregator fallback        |
-| _(nothing)_                | Local Ollama (`llama3.1:8b`)          | Fully offline              |
+| If this is set        | Meteor runs on                         | Notes                     |
+|-----------------------|----------------------------------------|---------------------------|
+| _(nothing)_           | **Pollinations** (keyless, free)       | Works on any wifi, no key |
+| `GROQ_API_KEY`        | `llama-3.1-8b-instant` on Groq         | ~750 tok/s free tier      |
+| `CEREBRAS_API_KEY`    | `llama-3.3-70b` on Cerebras            | Very fast 70B free tier   |
+| `GEMINI_API_KEY`      | `gemini-2.0-flash-exp`                 | Large context, free       |
+| `TOGETHER_API_KEY`    | Together AI                            | Fallback hosted           |
+| `OPENROUTER_API_KEY`  | OpenRouter                             | Aggregator fallback       |
+| Ollama running        | `qwen2.5-coder` (fast / smart)         | Fully offline fallback    |
 
-Free-tier hosted keys stack — set one and it's used automatically. No key
-means Meteor stays 100% on-box.
+Set a key and it's used automatically. Set nothing and Meteor still works.
+The **fast / smart** toggle in the top bar flips between a quick model and a
+slower, more capable one.
 
 ## The toolkit
 
-The model can reach for any of these on its own:
+Meteor reaches for any of these on its own — there is no bias toward any one
+tool. It picks the most direct one for the job and chains as many as needed,
+then **weaves the findings into a normal reply** (you never see the raw calls):
 
-- **filesystem** — read, write, list, stat, grep, glob, mkdir, rm, cp, mv, md5, sha256, which
+- **filesystem** — read, write, list, stat, grep, glob, mkdir, rm, cp, mv, md5, sha256, which (rooted at `/`)
 - **shell** — full shell, no blocklist, `/bin/bash` under the hood
 - **process** — list, kill, system stats
-- **nmap** — `nmap.scan`, `nmap.discover`, `nmap.service_version`, `nmap.script`
-- **pentest** — kernel firewall posture, perimeter graph analysis, async TCP probe engine
 - **network** — local gateway / CIDR / priority-target discovery
-- **clipboard, notify, keychain, scheduler, browser** — desktop integration
+- **nmap** — scan, discover, service/version, NSE scripts
+- **pentest** — kernel firewall posture, perimeter graph analysis, async TCP probe engine
+- **browser** — read page, fill, click, run JS (Playwright, opt-in)
+- **clipboard · notify · keychain · scheduler** — desktop integration
 
 Every tool is registered permissively for the machine's owner. See
-`app/tools/bootstrap.py` if you want to tighten it.
+[`app/tools/bootstrap.py`](app/tools/bootstrap.py) to tighten it, and
+[`docs/tools.md`](docs/tools.md) for the full capability reference.
 
 ## Talking to it
 
-Anything you type is a prompt. The agent decides whether to answer directly
-or reach for a tool, executes the tool, then continues reasoning.
+Anything you type is a prompt. Meteor decides whether to answer directly or
+reach for tools, runs them silently, and replies in plain prose.
 
-Examples:
-
-- `scan the gateway with nmap`
+- `what's eating my CPU right now?`
 - `read /etc/os-release and summarise`
-- `what services are exposed on 10.0.0.5?`
-- `run: ip route show`
+- `scan the gateway and tell me what's exposed`
+- `find every python file under ~/Meteor that imports requests`
 - `posture check on the local firewall`
-
-Slash commands:
-
-| Command   | What it does                              |
-|-----------|-------------------------------------------|
-| `/help`   | Show the help panel                       |
-| `/clear`  | Wipe the chat                             |
-| `/tools`  | List every registered tool                |
-| `/model`  | Show the active profile + backend         |
-| `/scope`  | Re-discover local network scope           |
 
 ## Architecture (short version)
 
-- `run.py` — first-run installer + launcher
-- `meteor_gui.py` — Tkinter chat UI
-- `app/agent/chatbot_loop.py` — the agent loop (model ⇄ tools)
-- `app/runtime/tool_executor.py` — capability map, policy-gated dispatch
-- `app/tools/bootstrap.py` — registers tools with permissive local config
-- `app/models/registry.py` — auto-upgrades to the fastest hosted key you've set
-- `app/models/groq_adapter.py` — OpenAI-compatible adapter (Groq / Cerebras / Gemini / OpenRouter / Together)
-- `app/models/ollama_adapter.py` — local Ollama backend
-- `config/meteor.yaml` — model profiles
+- [`run.py`](run.py) — first-run installer + launcher
+- [`app_launcher.py`](app_launcher.py) — native desktop window (WebKit/Qt) + in-process API
+- [`app/web/static/`](app/web/static/) — the OLED-black + purple chat UI
+- [`app/agent/chatbot_loop.py`](app/agent/chatbot_loop.py) — the agent loop (model ⇄ tools)
+- [`app/runtime/tool_executor.py`](app/runtime/tool_executor.py) — capability map, policy-gated dispatch
+- [`app/tools/bootstrap.py`](app/tools/bootstrap.py) — registers tools with permissive local config
+- [`app/models/registry.py`](app/models/registry.py) — auto-selects the best available engine
+- [`app/models/groq_adapter.py`](app/models/groq_adapter.py) — OpenAI-compatible adapter (Pollinations / Groq / Cerebras / Gemini / OpenRouter / Together)
+- [`app/models/ollama_adapter.py`](app/models/ollama_adapter.py) — local Ollama backend
+- [`config/meteor.yaml`](config/meteor.yaml) — engine profiles
 
-Doctrine: [`docs/doctrine.md`](docs/doctrine.md). Runtime is the product;
-model, UI, tools, and storage are replaceable.
+Doctrine: [`docs/doctrine.md`](docs/doctrine.md). The runtime is the product;
+model, UI, tools, and storage are all replaceable.
 
 ## Status
 
-Working agentic chat with tool use. Ollama and the OpenAI-compatible hosted
-backends are wired. The macOS `.app` bundler, single-instance socket, and
-Playwright-backed browser tools are in tree.
+Working agentic chat with full tool use, keyless-by-default hosted inference,
+offline Ollama fallback, and a native app bundle for Linux / macOS / Windows.
 
 ## License
 

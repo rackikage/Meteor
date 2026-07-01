@@ -152,6 +152,49 @@ def ensure_ollama_running(*, wait_seconds: float = DEFAULT_WAIT_SECONDS) -> bool
     return False
 
 
+def _installed_models() -> set[str]:
+    """Return the set of models already present in the local Ollama."""
+    try:
+        conn = http.client.HTTPConnection(OLLAMA_HOST, OLLAMA_PORT, timeout=3.0)
+        conn.request("GET", "/api/tags")
+        resp = conn.getresponse()
+        if resp.status != 200:
+            return set()
+        import json as _json
+        data = _json.loads(resp.read().decode("utf-8"))
+        return {m.get("name", "") for m in data.get("models", []) if m.get("name")}
+    except Exception:
+        return set()
+
+
+def ensure_models_pulled(models: list[str], *, background: bool = True) -> None:
+    """Pull each model that's missing. Runs each pull in the background so the
+    UI comes up immediately; the model is unusable until its pull completes."""
+    binaries = _ollama_binaries()
+    if not binaries:
+        return
+    present = _installed_models()
+    for model in models:
+        if not model or model in present:
+            continue
+        # Accept "name" or "name:tag" — Ollama treats "name" as "name:latest".
+        if ":" not in model and any(m.startswith(f"{model}:") for m in present):
+            continue
+        print(f"Meteor: pulling model {model} (first run, this may take a while)...")
+        try:
+            if background:
+                subprocess.Popen(
+                    [binaries[0], "pull", model],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=(platform.system() != "Windows"),
+                )
+            else:
+                subprocess.run([binaries[0], "pull", model], check=False)
+        except OSError as exc:
+            logger.warning("Failed to pull %s: %s", model, exc)
+
+
 def shutdown_ollama_if_started() -> None:
     """Stop Ollama only if this process started `ollama serve` (not the Mac app)."""
     global _started_proc, _we_started

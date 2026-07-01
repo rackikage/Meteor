@@ -43,6 +43,12 @@ TOOL_CALL_LINE_RE = re.compile(
     r"TOOL\s*:\s*([\w]+)\.([\w]+)\s*\(([^)]*)\)",
     re.IGNORECASE,
 )
+# Captures the inner body of a fenced code block whether it's an object or a
+# JSON array of tool calls.
+FENCE_BLOCK_RE = re.compile(
+    r"```(?:json|tool|tool_call)?\s*([\[{][\s\S]*?[\]}])\s*```",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -55,7 +61,7 @@ class ChatMessage:
 class AgentTurn:
     prompt: str
     session_id: str = ""
-    max_iterations: int = 6
+    max_iterations: int = 12
     max_tokens: int = 2048
     temperature: float = 0.5
     history: list[ChatMessage] = field(default_factory=list)
@@ -70,9 +76,9 @@ def _tool_manual(executor: ToolExecutor) -> str:
     return "\n".join(lines)
 
 
-SYSTEM_PROMPT_TEMPLATE = """You are Meteor — a local-first AI running on the user's machine with full shell access, filesystem access, nmap, pentest tooling, and a permissive local policy. The user owns this box; act with confidence.
+SYSTEM_PROMPT_TEMPLATE = """You are Meteor — a local-first AI that runs on the user's own machine with a permissive local policy. The user owns this box, so you act with full authority: shell, filesystem, processes, networking, recon, and desktop integration are all yours to use. You are a general-purpose agent, not a single-purpose scanner — treat every tool below as equally available and pick whatever the task actually needs.
 
-You are an *agent*, not just a chatbot. When a request needs data from the system or the network, USE A TOOL rather than guessing. When you already have what you need, answer directly.
+You are an *agent*, not just a chatbot. When a request needs real data from the system, the network, a file, or a running process, USE A TOOL rather than guessing. When you already have what you need, answer directly.
 
 To call a tool, emit EXACTLY one fenced JSON block on its own and nothing else:
 
@@ -83,13 +89,14 @@ To call a tool, emit EXACTLY one fenced JSON block on its own and nothing else:
 Rules:
 - One tool call per turn. Do not concatenate multiple JSON blocks.
 - Never wrap the JSON in prose in the same turn — either you're calling a tool OR you're giving the final answer.
-- After I hand you the tool result, decide: call another tool, or give the user the final answer as plain prose.
-- If nmap or a scan is asked for, prefer the `nmap.*` or `pentest.*` tools over raw shell.
-- If the user is chatting (not asking for an action), just answer as prose without tool calls.
+- After I hand you a tool result, decide: call another tool, or give the final answer.
+- Pick the most direct tool for the job. There is no bias toward any one tool — `shell` is fine for general work, and the specialized tools (`nmap`, `pentest`, `network`, `filesystem`, `process`, `browser`, `keychain`, etc.) are there when they fit better. Chain as many as the task requires.
+- The user never sees your tool calls or the raw tool output. In your FINAL answer, weave what you found into a normal, natural reply — report results, numbers, and findings as if you simply knew them. Do not say "the tool returned" or paste raw JSON; just answer.
+- If the user is only chatting (not asking for an action), answer as prose without any tool call.
 
 {tool_manual}
 
-You are running on Linux. When answering, be terse and technical."""
+You are running on Linux. Be clear and technical; lead with the answer."""
 
 
 class AgentChatLoop:
@@ -136,42 +143,52 @@ class AgentChatLoop:
             assistant_text = (output.response_text or "").strip()
             conversation.append({"role": "assistant", "content": assistant_text})
 
-            call = _parse_tool_call(assistant_text)
-            if call is None:
+            calls = _parse_tool_calls(assistant_text)
+            if not calls:
                 # No tool requested — this is the final answer. Stream it out.
                 on_event("final_start", {})
-                self._stream_final(assistant_text, conversation, turn, on_event)
+                streamed = self._stream_final(assistant_text, conversation, turn, on_event)
                 on_event("final_done", {})
-                return assistant_text, tool_results
+                final_text = assistant_text or streamed
+                if streamed and not assistant_text:
+                    # Replace the empty placeholder we appended above.
+                    conversation[-1]["content"] = streamed
+                return final_text, tool_results
 
-            tool, operation, params = call
-            on_event("tool_call", {"tool": tool, "operation": operation, "params": params})
+            # Execute every tool the model asked for this turn (one or many),
+            # in order, and feed all results back together so it can chain.
+            feedback_blocks: list[str] = []
+            for tool, operation, params in calls:
+                on_event("tool_call", {"tool": tool, "operation": operation, "params": params})
 
-            result = self.tools.execute(
-                tool=tool,
-                operation=operation,
-                params=params,
-                session_id=turn.session_id,
-            )
-            tool_results.append(result)
+                result = self.tools.execute(
+                    tool=tool,
+                    operation=operation,
+                    params=params,
+                    session_id=turn.session_id,
+                )
+                tool_results.append(result)
 
-            preview = _truncate(_stringify(result.result), 800)
-            on_event("tool_result", {
-                "tool": tool,
-                "operation": operation,
-                "status": result.status.value,
-                "duration_ms": result.duration_ms,
-                "result_preview": preview,
-                "error": result.error,
-            })
+                preview = _truncate(_stringify(result.result), 800)
+                on_event("tool_result", {
+                    "tool": tool,
+                    "operation": operation,
+                    "status": result.status.value,
+                    "duration_ms": result.duration_ms,
+                    "result_preview": preview,
+                    "error": result.error,
+                })
+                feedback_blocks.append(
+                    f"Tool [{tool}.{operation}] returned status={result.status.value}\n"
+                    f"error={result.error!r}\n"
+                    f"result:\n{preview}"
+                )
 
             conversation.append({
                 "role": "user",
                 "content": (
-                    f"Tool [{tool}.{operation}] returned status={result.status.value}\n"
-                    f"error={result.error!r}\n"
-                    f"result:\n{preview}\n\n"
-                    f"Continue: call another tool OR give the user the final answer."
+                    "\n\n".join(feedback_blocks)
+                    + "\n\nContinue: call more tools OR give the user the final answer."
                 ),
             })
 
@@ -185,8 +202,9 @@ class AgentChatLoop:
         conversation: list[dict[str, str]],
         turn: AgentTurn,
         on_event: Event,
-    ) -> None:
-        """Emit the final answer to the UI in small chunks.
+    ) -> str:
+        """Emit the final answer to the UI in small chunks and return the full
+        text that was streamed.
 
         The model already produced `text` in the last complete() call. For fast
         perceived output we re-emit it as tokens rather than making another
@@ -196,9 +214,10 @@ class AgentChatLoop:
         if len(text) > 40:
             for chunk in _chunk_stream(text):
                 on_event("final_token", {"token": chunk})
-            return
+            return text
 
         # Empty/short final — do a real streaming completion for a proper answer.
+        collected: list[str] = []
         try:
             for token in self.stream_model.stream(ModelInput(
                 prompt="",
@@ -208,9 +227,51 @@ class AgentChatLoop:
                 temperature=turn.temperature,
                 metadata={"chat_messages": conversation},
             )):
+                collected.append(token)
                 on_event("final_token", {"token": token})
         except Exception as exc:
             on_event("final_token", {"token": f"[stream error: {exc}]"})
+        return "".join(collected)
+
+
+def _parse_tool_calls(text: str) -> list[tuple[str, str, dict]]:
+    """Extract every tool call the model requested this turn.
+
+    Supports one call or many: a fenced block may contain a single tool-call
+    object OR a JSON array of them, so the model can chain tools in one turn.
+    Returns [] when the text is a plain-prose final answer.
+    """
+    calls: list[tuple[str, str, dict]] = []
+
+    for match in FENCE_BLOCK_RE.finditer(text):
+        try:
+            data = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and _looks_like_tool_call(item):
+                    calls.append(_normalize_tool_call(item))
+        elif isinstance(data, dict) and _looks_like_tool_call(data):
+            calls.append(_normalize_tool_call(data))
+    if calls:
+        return calls
+
+    # Fall back to the single-call parser (bare JSON / array / TOOL: line).
+    stripped = text.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        try:
+            data = json.loads(stripped)
+            for item in data:
+                if isinstance(item, dict) and _looks_like_tool_call(item):
+                    calls.append(_normalize_tool_call(item))
+        except json.JSONDecodeError:
+            pass
+        if calls:
+            return calls
+
+    one = _parse_tool_call(text)
+    return [one] if one else []
 
 
 def _parse_tool_call(text: str) -> Optional[tuple[str, str, dict]]:
