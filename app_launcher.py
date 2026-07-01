@@ -75,7 +75,9 @@ def main() -> None:
     server_thread = threading.Thread(target=_serve, args=(port,), daemon=True)
     server_thread.start()
 
-    _wait_for_health(url, timeout_s=25.0)
+    if not _wait_for_health(url, timeout_s=25.0):
+        print(f"Meteor: backend did not come up on {url} within 25s — opening window anyway",
+              file=sys.stderr)
 
     os.environ.setdefault("QT_API", "pyqt6")
     import webview  # native window
@@ -93,9 +95,9 @@ def main() -> None:
         zoomable=True,
     )
 
-    # gtk backend on Linux uses WebKit2GTK; qt uses PyQt6 WebEngine; edgechromium
-    # (default) on Windows; cocoa on macOS. On Linux, prefer GTK when PyGObject
-    # is importable so we skip the noisy Qt-probe fallback.
+    # Linux picks GTK (WebKit2GTK 4.1) if the typelib is actually available,
+    # otherwise Qt (PyQt6 WebEngine, bundled via pip). Windows uses EdgeChromium,
+    # macOS uses Cocoa — both handled by pywebview's own default detection.
     gui = os.environ.get("METEOR_WEBVIEW_GUI")  # "gtk" | "qt" | None
     if not gui and sys.platform.startswith("linux"):
         try:

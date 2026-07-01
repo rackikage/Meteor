@@ -111,6 +111,27 @@ class OpenAICompatibleAdapter(ModelAdapter):
         self._context_window = profile.context_window
         self._max_tokens = profile.max_tokens
         self._env_var = env_var
+        # Lazy-built keyless fallback (see _get_fallback).
+        self._fallback: OpenAICompatibleAdapter | None = None
+
+    def _get_fallback(self) -> OpenAICompatibleAdapter | None:
+        """Return a keyless Pollinations fallback for transient upstream failures.
+        None when already on Pollinations (no self-fallback loop)."""
+        if self._backend_key == "pollinations":
+            return None
+        if self._fallback is None:
+            fallback_profile = ModelProfile(
+                backend="pollinations",
+                model_path="openai-fast",
+                context_window=32768,
+                temperature=self._profile.temperature,
+                max_tokens=self._max_tokens,
+                wired=True,
+                base_url="https://text.pollinations.ai/openai",
+                role="fast",
+            )
+            self._fallback = OpenAICompatibleAdapter(fallback_profile, backend_key="pollinations")
+        return self._fallback
 
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
@@ -178,6 +199,10 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 status = exc.response.status_code if exc.response is not None else None
                 body = exc.response.text[:800] if exc.response is not None else ""
                 logger.warning("%s completion failed: %s %s", self._backend_key, exc, body)
+                fallback = self._get_fallback()
+                if fallback and (status == 429 or (status and status >= 500)):
+                    logger.info("%s → falling back to pollinations (status=%s)", self._backend_key, status)
+                    return fallback.complete(input)
                 return self._error(self._friendly_http_error(status, body), body)
             except Exception as exc:
                 last_err = str(exc)
@@ -240,9 +265,23 @@ class OpenAICompatibleAdapter(ModelAdapter):
             except Exception:
                 body = ""
             logger.warning("%s stream failed: %s %s", self._backend_key, exc, body)
+            # Transient upstream failures (rate limit, 5xx): silently retry on the
+            # keyless Pollinations backend so the user gets an answer instead of
+            # an error surface. Only kicks in when we haven't yielded any tokens.
+            fallback = self._get_fallback()
+            if fallback and not yielded_any and (status == 429 or (status and status >= 500)):
+                logger.info("%s → falling back to pollinations (status=%s)", self._backend_key, status)
+                yield from fallback.stream(input)
+                return
             yield self._friendly_http_error(status, body)
         except Exception as exc:
             logger.warning("%s stream failed: %s", self._backend_key, exc)
+            # Network / timeout / DNS: same failover as above.
+            fallback = self._get_fallback()
+            if fallback and not yielded_any:
+                logger.info("%s → falling back to pollinations (network error)", self._backend_key)
+                yield from fallback.stream(input)
+                return
             yield f"[{self._backend_key} error: something went wrong talking to the model. Try again in a moment.]"
 
     def _friendly_http_error(self, status: int | None, body: str) -> str:

@@ -421,14 +421,22 @@ def _parse_tool_call(text: str) -> Optional[tuple[str, str, dict]]:
         if isinstance(data, dict) and _looks_like_tool_call(data):
             return _normalize_tool_call(data)
 
-    # Bare JSON without fence.
+    # Bare JSON without fence — either the entire text, or a leading object
+    # followed by prose commentary (which small models often emit).
     stripped = text.strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
+    if stripped.startswith("{"):
         try:
             data = json.loads(stripped)
             if isinstance(data, dict) and _looks_like_tool_call(data):
                 return _normalize_tool_call(data)
         except json.JSONDecodeError:
+            pass
+        try:
+            decoder = json.JSONDecoder()
+            data, _ = decoder.raw_decode(stripped)
+            if isinstance(data, dict) and _looks_like_tool_call(data):
+                return _normalize_tool_call(data)
+        except (json.JSONDecodeError, ValueError):
             pass
 
     line = TOOL_CALL_LINE_RE.search(text)
@@ -450,8 +458,11 @@ def _parse_tool_call(text: str) -> Optional[tuple[str, str, dict]]:
 def _looks_like_tool_call(data: dict) -> bool:
     if "tool" in data and "operation" in data:
         return True
-    # Also support {"name": "tool.op", "arguments": {...}} shape.
+    # {"name": "tool.op", "arguments": {...}} shape.
     if "name" in data and isinstance(data.get("name"), str) and "." in data["name"]:
+        return True
+    # Small models sometimes fold operation into the tool key: {"tool": "process.list"}.
+    if isinstance(data.get("tool"), str) and "." in data["tool"]:
         return True
     return False
 
@@ -463,6 +474,9 @@ def _normalize_tool_call(data: dict) -> tuple[str, str, dict]:
             str(data["operation"]),
             dict(data.get("params") or data.get("arguments") or {}),
         )
+    if isinstance(data.get("tool"), str) and "." in data["tool"]:
+        tool, _, operation = str(data["tool"]).partition(".")
+        return tool, operation, dict(data.get("params") or data.get("arguments") or {})
     name = str(data["name"])
     tool, _, operation = name.partition(".")
     return tool, operation, dict(data.get("arguments") or data.get("params") or {})
