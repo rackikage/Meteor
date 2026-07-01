@@ -23,7 +23,11 @@ dependencies = [
     "qtpy>=2.4",
     "PyQt6>=6.6",
     "PyQt6-WebEngine>=6.6",
+    "mcp>=1.0",
 ]
+
+[project.scripts]
+meteor-mcp = "app.mcp.server:main"
 
 [project.optional-dependencies]
 llama = [

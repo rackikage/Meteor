@@ -71,9 +71,29 @@ then **weaves the findings into a normal reply** (you never see the raw calls):
 - **browser** — read page, fill, click, run JS (Playwright, opt-in)
 - **clipboard · notify · keychain · scheduler** — desktop integration
 
+- **arsenal** — `arsenal.detect` reports every installed pentest tool grouped by
+  pipeline phase (recon → forensics); `arsenal.run` executes any of them
+- **weapons** — first-class wrappers for the heavy hitters: `sqlmap`, `nuclei`,
+  `nikto`, `whatweb`, `wpscan`, `gobuster`, `ffuf`, `feroxbuster`, `hydra`,
+  `searchsploit`, `dnsrecon`, `enum4linux`, `smbmap`, `masscan`, `exiftool`, `binwalk`
+
 Every tool is registered permissively for the machine's owner. See
 [`app/tools/bootstrap.py`](app/tools/bootstrap.py) to tighten it, and
 [`docs/tools.md`](docs/tools.md) for the full capability reference.
+
+## Drive it from any AI (MCP)
+
+Meteor's whole tool core is exposed over the Model Context Protocol, so a
+stronger brain than the built-in loop — Claude Code, Cursor, another agent — can
+mount it and wield the arsenal:
+
+```bash
+claude mcp add meteor -- /path/to/Meteor/.venv/bin/meteor-mcp
+```
+
+All 68 capabilities become MCP tools (one source of truth — the app and MCP
+never drift). Catastrophic actions are refused on the MCP channel by default
+since no human is there to confirm. See [`docs/mcp-arsenal.md`](docs/mcp-arsenal.md).
 
 ## Talking to it
 
@@ -94,6 +114,8 @@ reach for tools, runs them silently, and replies in plain prose.
 - [`app/agent/chatbot_loop.py`](app/agent/chatbot_loop.py) — the agent loop (model ⇄ tools)
 - [`app/runtime/tool_executor.py`](app/runtime/tool_executor.py) — capability map, policy-gated dispatch
 - [`app/tools/bootstrap.py`](app/tools/bootstrap.py) — registers tools with permissive local config
+- [`app/arsenal/`](app/arsenal/) — installed-tool detection + first-class weapon wrappers
+- [`app/mcp/server.py`](app/mcp/server.py) — `meteor-mcp` stdio server (projects the tool core to any AI)
 - [`app/models/registry.py`](app/models/registry.py) — auto-selects the best available engine
 - [`app/models/groq_adapter.py`](app/models/groq_adapter.py) — OpenAI-compatible adapter (Pollinations / Groq / Cerebras / Gemini / OpenRouter / Together)
 - [`app/models/ollama_adapter.py`](app/models/ollama_adapter.py) — local Ollama backend

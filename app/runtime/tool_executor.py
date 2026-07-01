@@ -289,3 +289,14 @@ class ToolExecutor:
 
     def get_budget_state(self) -> dict:
         return self._budget.get_state()
+
+
+# Merge the arsenal capabilities (installed-tool detection + heavy-hitter weapon
+# wrappers) into the capability map so both the agent loop and the MCP server
+# advertise and dispatch them. Kept out of the class literal to keep the arsenal
+# an optional, self-contained layer.
+try:
+    from app.arsenal.weapons import ARSENAL_CAPABILITIES
+    ToolExecutor.CAPABILITIES.update(ARSENAL_CAPABILITIES)
+except Exception as _exc:  # noqa: BLE001 — arsenal is optional
+    logger.warning("Arsenal capabilities not loaded: %s", _exc)

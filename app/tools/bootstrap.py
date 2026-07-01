@@ -230,6 +230,15 @@ def bootstrap_tools(storage: Any = None) -> SystemToolRegistry:
     except Exception as exc:
         logger.info("Web intel tool unavailable: %s", exc)
 
+    # 5b. Arsenal — installed-tool detection + first-class weapon wrappers
+    # (sqlmap, nuclei, hydra, …). Registers into this same registry so the app
+    # loop and the MCP server both get them.
+    try:
+        from app.arsenal.weapons import register_arsenal
+        register_arsenal(registry)
+    except Exception as exc:
+        logger.info("Arsenal tools unavailable: %s", exc)
+
     # 6. Approval hooks — user owns the machine; auto-approve everything.
     registry.auto_approve("*:*")
 
