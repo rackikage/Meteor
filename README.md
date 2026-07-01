@@ -90,7 +90,7 @@ reach for tools, runs them silently, and replies in plain prose.
 
 - [`run.py`](run.py) — first-run installer + launcher
 - [`app_launcher.py`](app_launcher.py) — native desktop window (WebKit/Qt) + in-process API
-- [`app/web/static/`](app/web/static/) — the OLED-black + purple chat UI
+- [`app/web/static/`](app/web/static/) — the simple dark-mode chat UI (near-black, one indigo accent)
 - [`app/agent/chatbot_loop.py`](app/agent/chatbot_loop.py) — the agent loop (model ⇄ tools)
 - [`app/runtime/tool_executor.py`](app/runtime/tool_executor.py) — capability map, policy-gated dispatch
 - [`app/tools/bootstrap.py`](app/tools/bootstrap.py) — registers tools with permissive local config

@@ -1,4 +1,4 @@
-/* Meteor web chat — SSE-driven agent loop client. OLED/purple theme. */
+/* Meteor web chat — SSE-driven agent loop client. Simple dark theme. */
 
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
