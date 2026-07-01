@@ -193,15 +193,9 @@ async def switch_model(req: ModelSwitchRequest) -> dict:
             return {"ok": False, "error": f"unknown profile: {req.profile}"}
         target = req.profile
     elif req.role:
-        for name, prof in reg.config.models.profiles.items():
-            if prof.role == req.role and prof.backend.lower() == "ollama":
-                target = name
-                break
-        if target is None:
-            for name, prof in reg.config.models.profiles.items():
-                if prof.role == req.role:
-                    target = name
-                    break
+        # Hosted-first: keep the fast/smart toggle on the fast cloud path
+        # (Groq etc.) rather than a local Ollama model that may not be running.
+        target = reg.profile_for_role(req.role)
     if target is None:
         return {"ok": False, "error": "no matching profile"}
     _ACTIVE_PROFILE["name"] = target

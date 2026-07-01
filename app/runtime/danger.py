@@ -67,6 +67,13 @@ def classify_danger(tool: str, operation: str, params: dict) -> Optional[str]:
             return f"{operation} a protected system path ({path or '/'})"
         return None
 
+    # Recursive tree deletion is always worth a nod — one call can wipe a lot.
+    if tool == "filesystem" and operation == "remove_tree":
+        path = str(params.get("path") or "").rstrip("/")
+        if path in _PROTECTED_PREFIXES or path == "":
+            return f"recursively delete a protected system path ({path or '/'})"
+        return "recursively delete a directory tree"
+
     if tool == "process" and operation == "kill":
         pid = str(params.get("pid", ""))
         if pid in ("1", "-1"):

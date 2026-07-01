@@ -89,26 +89,44 @@ class KeychainManager:
             return []
 
     def _get_fernet(self):
-        import base64
         from cryptography.fernet import Fernet
         key_file = os.path.expanduser("~/.meteor/keychain.key")
         os.makedirs(os.path.dirname(key_file), exist_ok=True)
+        # Fernet.generate_key() already returns url-safe base64 bytes; persist
+        # and reload them verbatim. (An earlier version base64-decoded on read,
+        # producing 32 raw bytes that Fernet rejects — self-heal that here, and
+        # regenerate if the key file is empty/corrupt.)
         if os.path.exists(key_file):
-            with open(key_file, "r") as f:
-                key = base64.urlsafe_b64decode(f.read())
-        else:
-            key = Fernet.generate_key()
-            with open(key_file, "w") as f:
-                f.write(key.decode())
+            with open(key_file, "rb") as f:
+                key = f.read().strip()
+            try:
+                return Fernet(key)
+            except (ValueError, TypeError):
+                logger.warning("Keychain key at %s was invalid — regenerating", key_file)
+        key = Fernet.generate_key()
+        with open(key_file, "wb") as f:
+            f.write(key)
+        try:
+            os.chmod(key_file, 0o600)
+        except OSError:
+            pass
         return Fernet(key)
 
     def _load_fallback_store(self) -> dict:
         if not os.path.exists(self._fallback_path):
             return {}
         f = self._get_fernet()
-        with open(self._fallback_path, "rb") as fh:
-            decrypted = f.decrypt(fh.read())
-        return json.loads(decrypted)
+        try:
+            with open(self._fallback_path, "rb") as fh:
+                raw = fh.read()
+            if not raw:
+                return {}
+            return json.loads(f.decrypt(raw))
+        except Exception as exc:
+            # Empty/corrupt/undecryptable store (e.g. key was rotated) — treat as
+            # empty and let the next store() rewrite it fresh rather than crash.
+            logger.warning("Keychain store unreadable (%s) — starting fresh", exc.__class__.__name__)
+            return {}
 
     def _save_fallback_store(self, store: dict) -> None:
         f = self._get_fernet()

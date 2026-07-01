@@ -83,6 +83,33 @@ class ModelRegistry:
                 return picked
         return self.config.models.default_profile
 
+    def profile_for_role(self, role: str) -> Optional[str]:
+        """Pick the best available profile for a role ("fast"/"heavy") using the
+        same hosted-first priority as the default selection: a hosted backend
+        whose key is set (Groq → Cerebras → Gemini → Together → OpenRouter),
+        then keyless Pollinations, then any non-Ollama match, and finally Ollama
+        (offline fallback). This keeps the fast/smart toggle on the fast hosted
+        path instead of dropping to a local model that may not be running."""
+        profiles = self.config.models.profiles
+        priority = ("groq", "cerebras", "gemini_openai", "together", "openrouter")
+        for backend in priority:
+            env_var = _BACKEND_KEY_ENV[backend]
+            if not os.environ.get(env_var, "").strip():
+                continue
+            for name, prof in profiles.items():
+                if prof.backend.lower() == backend and prof.role == role:
+                    return name
+        for name, prof in profiles.items():
+            if prof.backend.lower() == "pollinations" and prof.role == role:
+                return name
+        for name, prof in profiles.items():
+            if prof.role == role and prof.backend.lower() != "ollama":
+                return name
+        for name, prof in profiles.items():
+            if prof.role == role:
+                return name
+        return None
+
     def resolve_for_request(self, metadata: Optional[dict] = None) -> ModelAdapter:
         """Route simple tasks to a fast profile; complex ops to default/heavy."""
         meta = metadata or {}

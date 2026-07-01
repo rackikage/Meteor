@@ -200,21 +200,24 @@ def bootstrap_tools(storage: Any = None) -> SystemToolRegistry:
     # 4. Optional tools — instantiate defensively; missing deps shouldn't break the runtime.
     for slug, module_path, class_name, description in (
         ("clipboard", "app.tools.system.clipboard", "ClipboardBridge", "Clipboard read/write"),
-        ("notify", "app.tools.system.notifications", "NotificationCenter", "Desktop notifications"),
-        ("keychain", "app.tools.system.keychain", "KeychainStore", "Credential storage"),
-        ("scheduler", "app.tools.system.scheduler", "SchedulerHook", "Cron / systemd tasks"),
+        ("notify", "app.tools.system.notifications", "NotificationService", "Desktop notifications"),
+        ("keychain", "app.tools.system.keychain", "KeychainManager", "Credential storage"),
+        ("scheduler", "app.tools.system.scheduler", "SchedulerService", "Cron / systemd tasks"),
         ("browser", "app.tools.system.browser_bridge", "BrowserBridge", "Chromium via playwright"),
     ):
         try:
             module = __import__(module_path, fromlist=[class_name])
             cls = getattr(module, class_name, None)
             if cls is None:
-                # Try the first exported class.
-                candidates = [attr for attr in dir(module) if attr.endswith(("Bridge", "Store", "Hook", "Center", "Manager"))]
+                # Fall back to the first class whose name ends in a known suffix.
+                candidates = [attr for attr in dir(module)
+                              if attr.endswith(("Bridge", "Store", "Hook", "Center", "Manager", "Service"))]
                 if candidates:
                     cls = getattr(module, candidates[0])
             if cls is not None:
                 registry.register(slug, cls(), description, version="1.0")
+            else:
+                logger.warning("Optional tool %s: no class found in %s", slug, module_path)
         except Exception as exc:
             logger.info("Optional tool %s unavailable: %s", slug, exc)
 

@@ -63,6 +63,30 @@ class FilesystemAgent:
             f.write(content)
         return len(content)
 
+    def edit(self, path: str, old_string: str, new_string: str,
+             replace_all: bool = False, encoding: str = "utf-8") -> dict:
+        """Surgical in-place edit: replace old_string with new_string.
+
+        Unlike write_file (whole-file rewrite), this preserves the rest of the
+        file. old_string must be unique unless replace_all=True. Returns a small
+        report the model can reason over instead of the whole file."""
+        self._operation_count["edit"] = self._operation_count.get("edit", 0) + 1
+        p = self._resolve(path)
+        text = p.read_text(encoding)
+        count = text.count(old_string)
+        if count == 0:
+            raise ValueError(f"old_string not found in {path}")
+        if count > 1 and not replace_all:
+            raise ValueError(
+                f"old_string is not unique in {path} ({count} matches) — "
+                f"add more surrounding context or pass replace_all=true"
+            )
+        new_text = text.replace(old_string, new_string) if replace_all \
+            else text.replace(old_string, new_string, 1)
+        p.write_text(new_text, encoding)
+        return {"path": str(p), "replacements": count if replace_all else 1,
+                "bytes": len(new_text)}
+
     def glob(self, pattern: str) -> list[str]:
         self._operation_count["glob"] = self._operation_count.get("glob", 0) + 1
         from pathlib import Path as P
