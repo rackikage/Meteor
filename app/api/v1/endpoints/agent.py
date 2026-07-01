@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
+import uuid
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import APIRouter
@@ -22,6 +24,29 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 # One rolling deque per session_id. Fine for a local single-user app.
 _SESSIONS: dict[str, list[ChatMessage]] = {}
 _MAX_HISTORY = 20
+
+# ── Pending danger-confirmations ─────────────────────────────────────
+# id → (threading.Event, {"approved": bool}). The agent loop (worker thread)
+# blocks on the Event; POST /agent/confirm sets it from the browser click.
+_PENDING_CONFIRMS: dict[str, tuple[threading.Event, dict]] = {}
+_CONFIRM_TIMEOUT_S = 180.0
+
+
+class ConfirmRequest(BaseModel):
+    id: str
+    approved: bool = False
+
+
+@router.post("/confirm")
+async def confirm_action(req: ConfirmRequest) -> dict:
+    """Resolve a pending danger-confirmation from the UI."""
+    entry = _PENDING_CONFIRMS.get(req.id)
+    if not entry:
+        return {"ok": False, "error": "unknown or expired confirmation id"}
+    event, holder = entry
+    holder["approved"] = bool(req.approved)
+    event.set()
+    return {"ok": True}
 
 
 class ChatRequest(BaseModel):
@@ -60,9 +85,24 @@ async def chat(req: ChatRequest) -> StreamingResponse:
 
         final_holder: dict[str, str] = {}
 
+        def confirm(info: dict) -> bool:
+            """Blocking confirm (runs on the worker thread): emit a
+            confirm_required event, then wait for the browser's decision."""
+            cid = uuid.uuid4().hex
+            event = threading.Event()
+            holder = {"approved": False}
+            _PENDING_CONFIRMS[cid] = (event, holder)
+            on_event("confirm_required", {"id": cid, **info})
+            try:
+                if not event.wait(timeout=_CONFIRM_TIMEOUT_S):
+                    return False  # timed out → treat as declined
+                return holder["approved"]
+            finally:
+                _PENDING_CONFIRMS.pop(cid, None)
+
         async def run_agent() -> None:
             try:
-                final_text, _ = await asyncio.to_thread(loop_obj.run, turn, on_event)
+                final_text, _ = await asyncio.to_thread(loop_obj.run, turn, on_event, confirm)
                 final_holder["text"] = final_text or ""
             except Exception as exc:
                 logger.exception("Agent loop crashed")

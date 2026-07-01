@@ -83,17 +83,25 @@ def main() -> None:
     webview.create_window(
         title="Meteor",
         url=url,
-        width=1180,
-        height=820,
-        min_size=(720, 520),
+        width=1280,
+        height=860,
+        min_size=(760, 540),
         background_color="#000000",
         resizable=True,
         text_select=True,
+        zoomable=True,
     )
 
     # gtk backend on Linux uses WebKit2GTK; qt uses PyQt6 WebEngine; edgechromium
-    # (default) on Windows; cocoa on macOS. pywebview picks automatically.
+    # (default) on Windows; cocoa on macOS. On Linux, prefer GTK when PyGObject
+    # is importable so we skip the noisy Qt-probe fallback.
     gui = os.environ.get("METEOR_WEBVIEW_GUI")  # "gtk" | "qt" | None
+    if not gui and sys.platform.startswith("linux"):
+        try:
+            import gi  # noqa: F401
+            gui = "gtk"
+        except Exception:
+            gui = None
     webview.start(
         gui=gui,
         icon=str(icon) if icon.exists() else None,

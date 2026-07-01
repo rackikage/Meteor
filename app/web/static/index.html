@@ -43,6 +43,19 @@
   <div class="composer-hint">Enter to send · Shift+Enter for newline</div>
 </footer>
 
+<div id="confirm-overlay" class="confirm-overlay" hidden>
+  <div class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="confirm-icon">⚠</div>
+    <div id="confirm-title" class="confirm-title">Confirm a serious action</div>
+    <div id="confirm-reason" class="confirm-reason"></div>
+    <pre id="confirm-cmd" class="confirm-cmd"></pre>
+    <div class="confirm-actions">
+      <button id="confirm-cancel" class="confirm-btn cancel">Cancel</button>
+      <button id="confirm-run" class="confirm-btn run">Run it</button>
+    </div>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
 </body>
 </html>

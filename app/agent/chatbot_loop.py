@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from app.models.contract import ModelAdapter, ModelInput
+from app.runtime.danger import classify_danger
 from app.runtime.tool_executor import ToolExecutor, ToolResult, ToolResultStatus
 
 logger = logging.getLogger(__name__)
@@ -113,8 +114,17 @@ class AgentChatLoop:
         self.tools = tools
         self.stream_model = stream_model or model
 
-    def run(self, turn: AgentTurn, on_event: Event) -> tuple[str, list[ToolResult]]:
-        """Execute the loop. Returns (final_text, tool_results)."""
+    def run(
+        self,
+        turn: AgentTurn,
+        on_event: Event,
+        confirm: Optional[Callable[[dict], bool]] = None,
+    ) -> tuple[str, list[ToolResult]]:
+        """Execute the loop. Returns (final_text, tool_results).
+
+        `confirm`, when provided, is called for catastrophic tool calls with
+        {tool, operation, params, reason}; returning False skips the call.
+        """
         system_prompt = SYSTEM_PROMPT_TEMPLATE.format(tool_manual=_tool_manual(self.tools))
 
         conversation: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
@@ -159,6 +169,39 @@ class AgentChatLoop:
             # in order, and feed all results back together so it can chain.
             feedback_blocks: list[str] = []
             for tool, operation, params in calls:
+                # Quick confirm gate for super-serious, irreversible actions.
+                reason = classify_danger(tool, operation, params)
+                if reason and confirm is not None:
+                    on_event("tool_call", {"tool": tool, "operation": operation,
+                                           "params": params, "danger": reason})
+                    approved = False
+                    try:
+                        approved = bool(confirm({
+                            "tool": tool, "operation": operation,
+                            "params": params, "reason": reason,
+                        }))
+                    except Exception as exc:
+                        logger.warning("Confirm callback failed: %s", exc)
+                    if not approved:
+                        declined = ToolResult(
+                            tool=tool, operation=operation,
+                            status=ToolResultStatus.ERROR,
+                            error=f"declined by user (guarded: {reason})",
+                            duration_ms=0,
+                        )
+                        tool_results.append(declined)
+                        on_event("tool_result", {
+                            "tool": tool, "operation": operation,
+                            "status": "declined", "result_preview": "",
+                            "error": declined.error,
+                        })
+                        feedback_blocks.append(
+                            f"Tool [{tool}.{operation}] was DECLINED by the user "
+                            f"(guarded action: {reason}). Do not retry it; continue "
+                            f"without it or tell the user it was cancelled."
+                        )
+                        continue
+
                 on_event("tool_call", {"tool": tool, "operation": operation, "params": params})
 
                 result = self.tools.execute(

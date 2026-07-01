@@ -11,6 +11,41 @@ const modeSmart = document.getElementById("mode-smart");
 
 const SESSION_ID = `web-${Math.random().toString(36).slice(2, 10)}`;
 
+// ── Danger confirm modal ───────────────────────────────────────────
+const confirmOverlay = document.getElementById("confirm-overlay");
+const confirmReason = document.getElementById("confirm-reason");
+const confirmCmd = document.getElementById("confirm-cmd");
+const confirmRun = document.getElementById("confirm-run");
+const confirmCancel = document.getElementById("confirm-cancel");
+
+function describeCall(p) {
+  if (p.tool === "shell") return p.params?.command || "";
+  const args = p.params ? JSON.stringify(p.params) : "";
+  return `${p.tool}.${p.operation}(${args})`;
+}
+
+async function resolveConfirm(id, approved) {
+  confirmOverlay.hidden = true;
+  try {
+    await fetch("/api/v1/agent/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, approved }),
+    });
+  } catch (e) {
+    console.error("confirm failed", e);
+  }
+}
+
+function showConfirm(payload) {
+  confirmReason.textContent = `Meteor wants to ${payload.reason}. This can't be undone.`;
+  confirmCmd.textContent = describeCall(payload);
+  confirmOverlay.hidden = false;
+  confirmRun.onclick = () => resolveConfirm(payload.id, true);
+  confirmCancel.onclick = () => resolveConfirm(payload.id, false);
+  confirmRun.focus();
+}
+
 // ── Model badge + mode toggle ──────────────────────────────────────
 async function refreshModelBadge() {
   try {
@@ -205,6 +240,10 @@ function handleEvent(evt, bubble, setFinal) {
     }
     case "final_start":
       if (bubble.textContent === "…") bubble.textContent = "";
+      break;
+    case "confirm_required":
+      // Serious, irreversible action — pause and ask before it runs.
+      showConfirm(payload);
       break;
     case "thinking":
     case "tool_call":
