@@ -6,6 +6,7 @@ endpoints and provides dependency injection for the runtime.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -288,13 +289,38 @@ def get_runtime() -> MeteorRuntime:
     return _runtime
 
 
+async def _prewarm_model() -> None:
+    """Fire the active model's health() in a background task so DNS + TLS +
+    the shared httpx pool are ready before the first user prompt. Failures
+    are harmless — the first request just pays the normal cold-start cost."""
+    try:
+        rt = get_runtime()
+        adapter = rt.model_registry.get_adapter()
+        await asyncio.wait_for(asyncio.to_thread(adapter.health), timeout=3.0)
+        logger.info("Model prewarm complete")
+    except asyncio.TimeoutError:
+        logger.info("Model prewarm timed out (harmless)")
+    except Exception as exc:  # noqa: BLE001 — never let prewarm crash startup
+        logger.info("Model prewarm skipped: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan — initialize on startup, shutdown on exit."""
     get_runtime()
-    yield
-    if _runtime:
-        _runtime.shutdown()
+    prewarm = asyncio.create_task(_prewarm_model())
+    try:
+        yield
+    finally:
+        if not prewarm.done():
+            prewarm.cancel()
+        if _runtime:
+            _runtime.shutdown()
+        try:
+            from app.models.groq_adapter import close_http_client
+            close_http_client()
+        except Exception:
+            pass
 
 
 app = FastAPI(

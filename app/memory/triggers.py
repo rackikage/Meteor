@@ -126,7 +126,7 @@ def install_memory_triggers(storage: SQLiteAdapter) -> None:
     Call this once during runtime initialization.
     """
     try:
-        storage.execute(MEMORY_TRIGGERS_SQL, store="memory")
+        storage.execute_script(MEMORY_TRIGGERS_SQL, store="memory")
         logger.info("Installed reactive memory triggers (5 triggers)")
     except Exception as e:
         logger.warning("Failed to install memory triggers: %s", e)

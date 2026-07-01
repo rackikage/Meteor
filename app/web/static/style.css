@@ -1,4 +1,5 @@
-/* Meteor — OLED black + purple accent. Pure #000 for true OLED savings. */
+/* Meteor — OLED black + purple accent, neon-green success, silver linings.
+   Pure #000 for true OLED savings. */
 :root {
   --bg: #000000;
   --bg-elev: #0a0710;
@@ -19,7 +20,15 @@
   --assistant-bubble: #0a0710;
 
   --danger: #ff5577;
-  --success: #66e0a4;
+  /* Neon green for success signals — flashy on OLED, easy to spot mid-stream. */
+  --success: #39ff14;
+  --success-glow: rgba(57, 255, 20, 0.45);
+  --success-soft: rgba(57, 255, 20, 0.12);
+
+  /* Silver linings — 1px cool-gray edges on cards, bubbles, composer. */
+  --silver: #c9d1de;
+  --silver-dim: #7d8493;
+  --silver-soft: rgba(201, 209, 222, 0.12);
 
   --radius: 14px;
   --radius-sm: 10px;
@@ -153,7 +162,7 @@ body {
 }
 .msg.assistant .bubble {
   background: var(--assistant-bubble);
-  border: 1px solid var(--border);
+  border: 1px solid var(--silver-dim);
   color: var(--text);
 }
 .msg.assistant .bubble.streaming::after {
@@ -187,7 +196,7 @@ body {
 .trace { max-width: 780px; margin: 8px auto; padding: 0 20px; }
 .trace-card {
   background: var(--bg-elev);
-  border: 1px solid var(--border);
+  border: 1px solid var(--silver-dim);
   border-left: 2px solid var(--accent);
   border-radius: var(--radius-sm);
   padding: 8px 12px;
@@ -222,7 +231,7 @@ body {
   align-items: flex-end;
   gap: 10px;
   background: var(--bg-elev);
-  border: 1px solid var(--border);
+  border: 1px solid var(--silver-dim);
   border-radius: var(--radius);
   padding: 10px 12px;
   transition: border-color 0.15s, box-shadow 0.2s;
@@ -384,7 +393,8 @@ pre:hover .copy-btn { opacity: 1; }
 .copy-btn.copied {
   color: var(--success);
   border-color: var(--success);
-  background: rgba(102, 224, 164, 0.1);
+  background: var(--success-soft);
+  box-shadow: 0 0 10px var(--success-glow);
 }
 .msg .bubble { position: relative; }
 .msg .bubble pre { position: relative; }

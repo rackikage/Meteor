@@ -128,11 +128,18 @@ class ModelRegistry:
             raise ValueError(f"Unknown model backend: {backend}")
 
     def health(self) -> dict:
-        """Return health status of all registered adapters."""
-        health = {}
+        """Return health status of all registered adapters.
+
+        Includes a top-level `healthy` bool (true iff every registered
+        profile reports healthy) so callers aggregating multiple components
+        via `.get("healthy", False)` see an accurate status instead of
+        always defaulting to unhealthy.
+        """
+        profiles = {}
         for name, adapter in self._adapters.items():
-            health[name] = adapter.health()
-        return health
+            profiles[name] = adapter.health()
+        all_healthy = all(p.get("healthy", False) for p in profiles.values()) if profiles else False
+        return {"healthy": all_healthy, "profiles": profiles}
 
     def list_profiles(self) -> list[str]:
         """List all available model profile names."""

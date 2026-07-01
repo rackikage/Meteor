@@ -2,17 +2,21 @@
 
 The loop:
     1. Build a system prompt that documents every registered tool.
-    2. Call the model with the conversation.
-    3. Parse a tool call from the response.
-    4. If a tool call is found, execute it, feed the result back, iterate.
-    5. If no tool call is found, that response IS the final answer — stream it
-       to the UI (word-by-word) and return.
-    6. Cap at `max_iterations` rounds so a confused model can't spin forever.
+    2. Stream a completion from the model. Peek the first non-whitespace bytes:
+       * looks like a fenced JSON / bare `{` → probably a tool call. Buffer the
+         whole stream silently and parse it after the model stops.
+       * anything else → prose final answer. Flush tokens straight to the UI
+         as they arrive.
+    3. If we parsed tool calls, execute them (in parallel when there are ≥2)
+       and feed the results back for another iteration.
+    4. If we streamed prose, we're already done.
+    5. Cap at `max_iterations` rounds so a confused model can't spin forever.
 
 Events surfaced via the callback so the GUI can render progress:
     "thinking"          → model is generating
     "tool_call"         → about to execute {tool, operation, params}
     "tool_result"       → tool returned {tool, operation, status, result_preview}
+    "final_start"       → first prose byte of the final answer is coming
     "final_token"       → one chunk of the final answer (for streaming render)
     "final_done"        → final answer complete
     "error"             → something blew up {message}
@@ -24,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -103,6 +108,13 @@ You are running on Linux. Be clear and technical; lead with the answer."""
 class AgentChatLoop:
     """Streaming tool-using chat loop backed by a ModelAdapter + ToolExecutor."""
 
+    # First non-whitespace chars that mean "this is a tool call, buffer silently".
+    _TOOL_CALL_PREFIXES = ("```", "{", "[")
+    # How many peeked chars we need before we commit to prose-vs-tool-call.
+    _PEEK_CHARS = 4
+    # Max parallel tool workers per turn.
+    _TOOL_POOL_SIZE = 8
+
     def __init__(
         self,
         model: ModelAdapter,
@@ -137,95 +149,39 @@ class AgentChatLoop:
         for iteration in range(turn.max_iterations):
             on_event("thinking", {"iteration": iteration})
             try:
-                output = self.model.complete(ModelInput(
-                    prompt=turn.prompt if iteration == 0 else "",
-                    system_prompt=system_prompt,
-                    context=[],
-                    max_tokens=turn.max_tokens,
-                    temperature=turn.temperature,
-                    metadata={"chat_messages": conversation, "task_mode": "structured" if iteration == 0 else "creative"},
-                ))
+                assistant_text, streamed_to_ui = self._stream_iteration(
+                    conversation, turn, on_event,
+                )
             except Exception as exc:
                 logger.warning("Agent loop model call failed: %s", exc)
                 on_event("error", {"message": str(exc)})
                 return f"[model error: {exc}]", tool_results
 
-            assistant_text = (output.response_text or "").strip()
+            assistant_text = assistant_text.strip()
             conversation.append({"role": "assistant", "content": assistant_text})
 
             calls = _parse_tool_calls(assistant_text)
             if not calls:
-                # No tool requested — this is the final answer. Stream it out.
-                on_event("final_start", {})
-                streamed = self._stream_final(assistant_text, conversation, turn, on_event)
-                on_event("final_done", {})
-                final_text = assistant_text or streamed
-                if streamed and not assistant_text:
-                    # Replace the empty placeholder we appended above.
-                    conversation[-1]["content"] = streamed
-                return final_text, tool_results
+                # No tool call — this iteration IS the final answer.
+                if streamed_to_ui:
+                    on_event("final_done", {})
+                else:
+                    # We buffered because the peek looked tool-shaped, but the
+                    # parser disagreed (e.g. bare JSON that isn't a tool call,
+                    # or an empty response). Emit as final answer now.
+                    on_event("final_start", {})
+                    if assistant_text:
+                        on_event("final_token", {"token": assistant_text})
+                    on_event("final_done", {})
+                return assistant_text, tool_results
 
-            # Execute every tool the model asked for this turn (one or many),
-            # in order, and feed all results back together so it can chain.
-            feedback_blocks: list[str] = []
-            for tool, operation, params in calls:
-                # Quick confirm gate for super-serious, irreversible actions.
-                reason = classify_danger(tool, operation, params)
-                if reason and confirm is not None:
-                    on_event("tool_call", {"tool": tool, "operation": operation,
-                                           "params": params, "danger": reason})
-                    approved = False
-                    try:
-                        approved = bool(confirm({
-                            "tool": tool, "operation": operation,
-                            "params": params, "reason": reason,
-                        }))
-                    except Exception as exc:
-                        logger.warning("Confirm callback failed: %s", exc)
-                    if not approved:
-                        declined = ToolResult(
-                            tool=tool, operation=operation,
-                            status=ToolResultStatus.ERROR,
-                            error=f"declined by user (guarded: {reason})",
-                            duration_ms=0,
-                        )
-                        tool_results.append(declined)
-                        on_event("tool_result", {
-                            "tool": tool, "operation": operation,
-                            "status": "declined", "result_preview": "",
-                            "error": declined.error,
-                        })
-                        feedback_blocks.append(
-                            f"Tool [{tool}.{operation}] was DECLINED by the user "
-                            f"(guarded action: {reason}). Do not retry it; continue "
-                            f"without it or tell the user it was cancelled."
-                        )
-                        continue
-
-                on_event("tool_call", {"tool": tool, "operation": operation, "params": params})
-
-                result = self.tools.execute(
-                    tool=tool,
-                    operation=operation,
-                    params=params,
-                    session_id=turn.session_id,
-                )
-                tool_results.append(result)
-
-                preview = _truncate(_stringify(result.result), 800)
-                on_event("tool_result", {
-                    "tool": tool,
-                    "operation": operation,
-                    "status": result.status.value,
-                    "duration_ms": result.duration_ms,
-                    "result_preview": preview,
-                    "error": result.error,
-                })
-                feedback_blocks.append(
-                    f"Tool [{tool}.{operation}] returned status={result.status.value}\n"
-                    f"error={result.error!r}\n"
-                    f"result:\n{preview}"
-                )
+            # A tool call was in the stream, so we buffered silently. Execute
+            # every tool the model asked for this turn (one or many). When
+            # there are ≥2 approved calls we run them in parallel; danger
+            # confirmations always run sequentially first.
+            feedback_blocks = self._execute_tools(
+                calls, turn, on_event, confirm, tool_results,
+            )
 
             conversation.append({
                 "role": "user",
@@ -239,42 +195,180 @@ class AgentChatLoop:
         tail = conversation[-1]["content"] if conversation else "[no response]"
         return tail, tool_results
 
-    def _stream_final(
+    def _stream_iteration(
         self,
-        text: str,
         conversation: list[dict[str, str]],
         turn: AgentTurn,
         on_event: Event,
-    ) -> str:
-        """Emit the final answer to the UI in small chunks and return the full
-        text that was streamed.
+    ) -> tuple[str, bool]:
+        """Stream one iteration from the model.
 
-        The model already produced `text` in the last complete() call. For fast
-        perceived output we re-emit it as tokens rather than making another
-        model call. If tool calls were made and the assistant text is short or
-        empty, do a real streaming pass for a proper answer.
+        Peeks the first non-whitespace bytes. If they start with a tool-call
+        indicator (```, {, [) the whole stream is buffered silently and the
+        caller parses it. Otherwise the tokens are flushed to the UI as they
+        arrive so the first word appears while the model is still generating.
+
+        Returns (full_text, streamed_to_ui).
         """
-        if len(text) > 40:
-            for chunk in _chunk_stream(text):
-                on_event("final_token", {"token": chunk})
-            return text
-
-        # Empty/short final — do a real streaming completion for a proper answer.
         collected: list[str] = []
-        try:
-            for token in self.stream_model.stream(ModelInput(
-                prompt="",
-                system_prompt=conversation[0]["content"] if conversation else "",
-                context=[],
-                max_tokens=turn.max_tokens,
-                temperature=turn.temperature,
-                metadata={"chat_messages": conversation},
-            )):
-                collected.append(token)
+        peek_buffer: list[str] = []
+        # None = still deciding; True = streaming prose to UI; False = silent.
+        streaming_to_ui: Optional[bool] = None
+
+        for token in self.stream_model.stream(ModelInput(
+            prompt="",
+            system_prompt=conversation[0]["content"] if conversation else "",
+            context=[],
+            max_tokens=turn.max_tokens,
+            temperature=turn.temperature,
+            metadata={"chat_messages": conversation},
+        )):
+            if not token:
+                continue
+            collected.append(token)
+
+            if streaming_to_ui is None:
+                peek_buffer.append(token)
+                stripped = "".join(peek_buffer).lstrip()
+                if len(stripped) >= self._PEEK_CHARS:
+                    if stripped.startswith(self._TOOL_CALL_PREFIXES):
+                        streaming_to_ui = False
+                    else:
+                        streaming_to_ui = True
+                        on_event("final_start", {})
+                        on_event("final_token", {"token": "".join(peek_buffer)})
+                        peek_buffer = []
+            elif streaming_to_ui:
                 on_event("final_token", {"token": token})
-        except Exception as exc:
-            on_event("final_token", {"token": f"[stream error: {exc}]"})
-        return "".join(collected)
+
+        full_text = "".join(collected)
+
+        # Response was shorter than PEEK_CHARS — decide from the full text.
+        if streaming_to_ui is None:
+            stripped = full_text.lstrip()
+            if stripped and not stripped.startswith(self._TOOL_CALL_PREFIXES):
+                streaming_to_ui = True
+                on_event("final_start", {})
+                on_event("final_token", {"token": full_text})
+            else:
+                streaming_to_ui = False
+
+        return full_text, streaming_to_ui
+
+    def _execute_tools(
+        self,
+        calls: list[tuple[str, str, dict]],
+        turn: AgentTurn,
+        on_event: Event,
+        confirm: Optional[Callable[[dict], bool]],
+        tool_results: list[ToolResult],
+    ) -> list[str]:
+        """Run the tools this turn. Danger-confirmations serialize (safety),
+        then all approved calls run in parallel via a thread pool. Feedback
+        blocks are returned in the original call order so the model sees them
+        in a stable sequence."""
+        n = len(calls)
+        feedback_blocks: list[Optional[str]] = [None] * n
+        approved: list[tuple[int, str, str, dict]] = []
+
+        # 1) Serialize danger checks — the confirm callback may block the loop
+        #    thread waiting for the browser, and we don't want two dangerous
+        #    prompts on screen at once.
+        for idx, (tool, operation, params) in enumerate(calls):
+            reason = classify_danger(tool, operation, params)
+            if reason and confirm is not None:
+                on_event("tool_call", {
+                    "tool": tool, "operation": operation,
+                    "params": params, "danger": reason,
+                })
+                ok = False
+                try:
+                    ok = bool(confirm({
+                        "tool": tool, "operation": operation,
+                        "params": params, "reason": reason,
+                    }))
+                except Exception as exc:
+                    logger.warning("Confirm callback failed: %s", exc)
+                if not ok:
+                    declined = ToolResult(
+                        tool=tool, operation=operation,
+                        status=ToolResultStatus.ERROR,
+                        error=f"declined by user (guarded: {reason})",
+                        duration_ms=0,
+                    )
+                    tool_results.append(declined)
+                    on_event("tool_result", {
+                        "tool": tool, "operation": operation,
+                        "status": "declined", "result_preview": "",
+                        "error": declined.error,
+                    })
+                    feedback_blocks[idx] = (
+                        f"Tool [{tool}.{operation}] was DECLINED by the user "
+                        f"(guarded action: {reason}). Do not retry it; continue "
+                        f"without it or tell the user it was cancelled."
+                    )
+                    continue
+            approved.append((idx, tool, operation, params))
+
+        # 2) Run approved calls. Single call: inline (cheaper than a pool).
+        if len(approved) == 1:
+            idx, tool, operation, params = approved[0]
+            feedback_blocks[idx] = self._run_and_report(
+                tool, operation, params, turn, on_event, tool_results,
+            )
+        elif approved:
+            workers = min(len(approved), self._TOOL_POOL_SIZE)
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="meteor-tool") as pool:
+                futures = {
+                    pool.submit(
+                        self._run_and_report,
+                        tool, operation, params, turn, on_event, tool_results,
+                    ): idx
+                    for idx, tool, operation, params in approved
+                }
+                for fut in as_completed(futures):
+                    idx = futures[fut]
+                    try:
+                        feedback_blocks[idx] = fut.result()
+                    except Exception as exc:
+                        logger.warning("Parallel tool call raised: %s", exc)
+                        feedback_blocks[idx] = (
+                            f"Tool call at position {idx} crashed: {exc!r}"
+                        )
+
+        return [b for b in feedback_blocks if b is not None]
+
+    def _run_and_report(
+        self,
+        tool: str,
+        operation: str,
+        params: dict,
+        turn: AgentTurn,
+        on_event: Event,
+        tool_results: list[ToolResult],
+    ) -> str:
+        """Execute one tool, emit call/result events, append to tool_results,
+        and return the feedback block for the model."""
+        on_event("tool_call", {"tool": tool, "operation": operation, "params": params})
+        result = self.tools.execute(
+            tool=tool, operation=operation,
+            params=params, session_id=turn.session_id,
+        )
+        tool_results.append(result)
+        preview = _truncate(_stringify(result.result), 800)
+        on_event("tool_result", {
+            "tool": tool,
+            "operation": operation,
+            "status": result.status.value,
+            "duration_ms": result.duration_ms,
+            "result_preview": preview,
+            "error": result.error,
+        })
+        return (
+            f"Tool [{tool}.{operation}] returned status={result.status.value}\n"
+            f"error={result.error!r}\n"
+            f"result:\n{preview}"
+        )
 
 
 def _parse_tool_calls(text: str) -> list[tuple[str, str, dict]]:
@@ -391,16 +485,3 @@ def _truncate(text: str, limit: int) -> str:
     return text[:limit] + f"\n… [truncated {len(text) - limit} chars]"
 
 
-def _chunk_stream(text: str, chunk_size: int = 24):
-    """Yield ~word-sized chunks for a snappy typing effect."""
-    if not text:
-        return
-    i = 0
-    while i < len(text):
-        end = min(i + chunk_size, len(text))
-        # Prefer a space boundary near the end.
-        space = text.rfind(" ", i, end)
-        if space > i and end < len(text):
-            end = space + 1
-        yield text[i:end]
-        i = end

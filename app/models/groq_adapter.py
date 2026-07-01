@@ -16,9 +16,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import threading
 from typing import Any, Iterator
 
-import requests
+import httpx
 
 from app.config import ModelProfile
 from app.models.contract import ModelAdapter, ModelInput, ModelOutput
@@ -48,6 +50,51 @@ _MAX_RETRIES = 3
 def _backoff(attempt: int) -> None:
     import time
     time.sleep(min(0.5 * (2 ** attempt), 3.0))
+
+
+# ── Shared HTTP client ──────────────────────────────────────────────────
+# One process-wide httpx.Client with HTTP/2 + keepalive pool. Using a shared
+# client means DNS resolution + TLS handshake + TCP setup happen once, not per
+# request. HTTP/2 additionally multiplexes streams over the same socket, so a
+# streaming SSE call and a completion call to the same host share a connection.
+_CLIENT: httpx.Client | None = None
+_CLIENT_LOCK = threading.Lock()
+
+_STREAM_TIMEOUT = httpx.Timeout(180.0, connect=5.0, read=180.0)
+_COMPLETE_TIMEOUT = httpx.Timeout(120.0, connect=5.0, read=120.0)
+_HEALTH_TIMEOUT = httpx.Timeout(5.0, connect=5.0, read=5.0)
+
+
+def get_http_client() -> httpx.Client:
+    """Return the shared httpx.Client, building it on first use."""
+    global _CLIENT
+    if _CLIENT is None:
+        with _CLIENT_LOCK:
+            if _CLIENT is None:
+                _CLIENT = httpx.Client(
+                    http2=True,
+                    limits=httpx.Limits(
+                        max_keepalive_connections=32,
+                        max_connections=64,
+                        keepalive_expiry=60.0,
+                    ),
+                    timeout=_COMPLETE_TIMEOUT,
+                    headers={"User-Agent": "Meteor/1.0"},
+                    follow_redirects=True,
+                )
+    return _CLIENT
+
+
+def close_http_client() -> None:
+    """Close the shared client — called from the FastAPI lifespan shutdown."""
+    global _CLIENT
+    with _CLIENT_LOCK:
+        if _CLIENT is not None:
+            try:
+                _CLIENT.close()
+            except Exception:
+                pass
+            _CLIENT = None
 
 
 class OpenAICompatibleAdapter(ModelAdapter):
@@ -90,17 +137,18 @@ class OpenAICompatibleAdapter(ModelAdapter):
             return self._missing_key()
 
         payload = self._build_payload(input, stream=False)
+        client = get_http_client()
         # Free/keyless endpoints (Pollinations) throw transient 5xx and the odd
         # empty completion under load. Retry a couple of times with backoff so a
         # flaky gateway doesn't surface as a blank chat reply.
         last_err = ""
         for attempt in range(_MAX_RETRIES):
             try:
-                resp = requests.post(
+                resp = client.post(
                     f"{self._base}/chat/completions",
                     headers=self._headers(),
                     json=payload,
-                    timeout=120,
+                    timeout=_COMPLETE_TIMEOUT,
                 )
                 if resp.status_code >= 500:
                     last_err = f"{resp.status_code} upstream error"
@@ -126,17 +174,20 @@ class OpenAICompatibleAdapter(ModelAdapter):
                     },
                     metadata={"backend": self._backend_key, "model": self._model},
                 )
-            except requests.HTTPError as exc:
-                body = exc.response.text[:400] if exc.response is not None else ""
-                last_err = f"{exc.response.status_code if exc.response else '?'} {body}"
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code if exc.response is not None else None
+                body = exc.response.text[:800] if exc.response is not None else ""
                 logger.warning("%s completion failed: %s %s", self._backend_key, exc, body)
-                break
+                return self._error(self._friendly_http_error(status, body), body)
             except Exception as exc:
                 last_err = str(exc)
                 logger.warning("%s completion failed (attempt %d): %s", self._backend_key, attempt + 1, exc)
                 _backoff(attempt)
                 continue
-        return self._error(f"[{self._backend_key}: {last_err}]", last_err)
+        return self._error(
+            f"[{self._backend_key}: no response after {_MAX_RETRIES} attempts — {last_err or 'unknown error'}]",
+            last_err,
+        )
 
     def stream(self, input: ModelInput) -> Iterator[str]:
         if not self._api_key and not self._keyless():
@@ -144,47 +195,92 @@ class OpenAICompatibleAdapter(ModelAdapter):
             return
 
         payload = self._build_payload(input, stream=True)
+        client = get_http_client()
+        yielded_any = False
         try:
-            resp = requests.post(
+            with client.stream(
+                "POST",
                 f"{self._base}/chat/completions",
                 headers=self._headers(),
                 json=payload,
-                timeout=180,
-                stream=True,
-            )
-            resp.raise_for_status()
-            for raw in resp.iter_lines(decode_unicode=True):
-                if not raw or not raw.startswith("data:"):
-                    continue
-                data_str = raw[5:].strip()
-                if data_str == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-                choices = chunk.get("choices") or []
-                if not choices:
-                    continue
-                delta = choices[0].get("delta") or {}
-                token = delta.get("content") or ""
-                if token:
-                    yield token
-                if choices[0].get("finish_reason"):
-                    break
-        except requests.HTTPError as exc:
-            body = exc.response.text[:400] if exc.response is not None else ""
+                timeout=_STREAM_TIMEOUT,
+            ) as resp:
+                resp.raise_for_status()
+                for raw in resp.iter_lines():
+                    if not raw or not raw.startswith("data:"):
+                        continue
+                    data_str = raw[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    token = delta.get("content") or ""
+                    if token:
+                        yielded_any = True
+                        yield token
+                    if choices[0].get("finish_reason"):
+                        break
+            if not yielded_any:
+                logger.warning("%s stream ended with no content tokens", self._backend_key)
+                yield (
+                    f"[{self._backend_key}: the model returned an empty response. "
+                    "Try rephrasing or resending.]"
+                )
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            body = ""
+            try:
+                body = exc.response.text[:800] if exc.response is not None else ""
+            except Exception:
+                body = ""
             logger.warning("%s stream failed: %s %s", self._backend_key, exc, body)
-            yield f"[{self._backend_key}: {exc.response.status_code if exc.response else '?'} {body}]"
+            yield self._friendly_http_error(status, body)
         except Exception as exc:
             logger.warning("%s stream failed: %s", self._backend_key, exc)
-            yield f"[{self._backend_key}: {exc}]"
+            yield f"[{self._backend_key} error: something went wrong talking to the model. Try again in a moment.]"
+
+    def _friendly_http_error(self, status: int | None, body: str) -> str:
+        """Turn a raw HTTP error body into a short, human-readable message
+        instead of leaking the provider's JSON payload into the chat."""
+        message = ""
+        try:
+            parsed = json.loads(body)
+            message = (parsed.get("error") or {}).get("message", "")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+        if status == 429:
+            retry_hint = ""
+            m = re.search(r"try again in ([\d.]+)s", message, re.IGNORECASE)
+            if m:
+                retry_hint = f" Retry in ~{float(m.group(1)):.0f}s."
+            return (
+                f"[{self._backend_key}: rate limit reached.{retry_hint} "
+                "Switch to a different model/profile or wait a moment and resend.]"
+            )
+        if status == 401:
+            return f"[{self._backend_key}: authentication failed — check {self._env_var}.]"
+        if status and status >= 500:
+            return f"[{self._backend_key}: upstream server error ({status}). Try again shortly.]"
+        if message:
+            return f"[{self._backend_key}: {message}]"
+        return f"[{self._backend_key}: request failed ({status or '?'}).]"
 
     def health(self) -> dict:
         if not self._api_key and not self._keyless():
             return {"healthy": False, "backend": self._backend_key, "error": f"missing {self._env_var}"}
         try:
-            resp = requests.get(f"{self._base}/models", headers=self._headers(), timeout=5)
+            resp = get_http_client().get(
+                f"{self._base}/models",
+                headers=self._headers(),
+                timeout=_HEALTH_TIMEOUT,
+            )
             healthy = resp.status_code == 200
             names: list[str] = []
             if healthy:

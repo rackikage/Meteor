@@ -718,6 +718,21 @@ class SQLiteAdapter(StorageAdapter):
             conn.commit()
             return []
 
+    def execute_script(self, sql: str, store: str = "memory") -> None:
+        """Execute a multi-statement SQL script (e.g. several CREATE TRIGGER
+        statements) against the given store. Unlike execute(), this allows
+        multiple ';'-separated statements in one call via sqlite3's
+        executescript, and is intended for trusted, hardcoded DDL only —
+        never for user-supplied or parameterized SQL.
+        """
+        if store not in self._connections:
+            raise ValueError(f"Unknown store: {store}. Available: {list(self._connections.keys())}")
+
+        with self._lock:
+            conn = self._connections[store]
+            conn.executescript(sql)
+            conn.commit()
+
     def migrate(self, store: str = "memory") -> list[MigrationRecord]:
         """Return all applied migrations for a store."""
         if store not in self._connections:
