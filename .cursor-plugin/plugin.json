@@ -2,7 +2,7 @@
   "name": "meteor",
   "displayName": "Meteor + KITT",
   "version": "0.1.0",
-  "description": "Local-first MCP toolkit with KITT operator: 75 tools (filesystem, shell, graph, grinder, nmap, pentest arsenal) via meteor-mcp.",
+  "description": "Local-first MCP toolkit with KITT + Loop Freak: 97 tools (filesystem, shell, graph, grinder, exploit, infiltration, interpreter, arsenal) via meteor-mcp.",
   "author": { "name": "rackikage" },
   "repository": "https://github.com/rackikage/Meteor",
   "keywords": ["mcp", "kitt", "security", "pentest", "nmap", "agent", "local-first"],

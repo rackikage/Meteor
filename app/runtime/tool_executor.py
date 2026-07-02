@@ -141,6 +141,90 @@ class ToolExecutor:
         "graph.tables": ("tables", [], "List asset graph tables"),
         "graph.counts": ("counts", [], "Row counts per asset graph table"),
         "graph.query": ("query", ["sql"], "Run a read-only SELECT/WITH query over the asset graph"),
+        "infiltration.footprint": (
+            "footprint", [],
+            "Passive engagement footprint: local scope, graph stats, arsenal inventory",
+        ),
+        "infiltration.intercept": (
+            "intercept", [],
+            "Capture grinder discovery events from the asset bus (pipeline intel, not wiretap)",
+        ),
+        "infiltration.peek": (
+            "peek", [],
+            "Latest hosts/services from the asset graph",
+        ),
+        "infiltration.status": (
+            "status", [],
+            "Full pipeline snapshot: footprint + intercept + graph peek",
+        ),
+        "exploit.intel": (
+            "intel", ["ip", "port", "service"],
+            "CVE + Exploit-DB research with attack score and next-tool hints",
+        ),
+        "exploit.prioritize": (
+            "prioritize", [],
+            "Rank in-graph hosts by service risk and stored CVE severity",
+        ),
+        "exploit.chain": (
+            "chain", ["ip", "port", "service"],
+            "Suggest authorized scanner chain for a fingerprinted service",
+        ),
+        "exploit.gaps": (
+            "gaps", [],
+            "Firewall/perimeter gap analysis from graph + 2027 defensive context",
+        ),
+        "exploit.cve_map": (
+            "cve_map", [],
+            "Map graph vulnerability rows; optional NVD enrichment",
+        ),
+        "reverse.identify": (
+            "identify", ["path"],
+            "File type, hashes, entropy — static metadata for a local binary",
+        ),
+        "reverse.strings": (
+            "strings", ["path"],
+            "Extract printable strings from a local file",
+        ),
+        "reverse.scan": (
+            "scan", ["path"],
+            "Binwalk signature scan (no extraction)",
+        ),
+        "reverse.symbols": (
+            "symbols", ["path"],
+            "Dynamic symbol table via readelf/objdump/nm",
+        ),
+        "reverse.analyze": (
+            "analyze", ["path"],
+            "Full static RE report: identify + strings + scan + symbols",
+        ),
+        "loopfreak.pulse": (
+            "pulse", [],
+            "One Loop Freak round: footprint → intercept → prioritize",
+        ),
+        "loopfreak.cycle": (
+            "cycle", [],
+            "Multi-round recon loop until graph host count plateaus",
+        ),
+        "loopfreak.status": (
+            "status", [],
+            "Loop Freak state and default tool chain",
+        ),
+        "interpreter.run": (
+            "run", ["code"],
+            "Execute Python in a persistent local session (Open Interpreter style)",
+        ),
+        "interpreter.bash": (
+            "bash", ["code"],
+            "Run a bash snippet locally via shell (blocked: reverse/bind patterns)",
+        ),
+        "interpreter.reset": (
+            "reset", [],
+            "Clear persistent Python session state",
+        ),
+        "interpreter.status": (
+            "status", [],
+            "Interpreter session keys and history length",
+        ),
         "web.search": ("search", ["query"], "General web search (DuckDuckGo)"),
         "web.cves": ("cves", ["service"], "Look up CVEs for a service/banner (NVD)"),
         "web.exploits": ("exploits", ["service"], "Search Exploit-DB for a service/banner"),
@@ -361,6 +445,66 @@ BASE_CAPABILITY_SCHEMAS: dict[str, dict] = {
         {"cidr": {**_STR, "description": "Optional subnet; omit to scan every in-scope host"}}, []),
     "graph.query": _schema(
         {"sql": {**_STR, "description": "Read-only SELECT/WITH query over the asset graph"}}, ["sql"]),
+    "infiltration.footprint": _schema(
+        {"engagement_cidr": {**_STR, "description": "Optional declared authorized CIDR for this engagement"}},
+        []),
+    "infiltration.intercept": _schema(
+        {"max_events": {"type": "integer", "description": "Max bus events to capture (default 200)"}},
+        []),
+    "infiltration.peek": _schema(
+        {"limit": {"type": "integer", "description": "Max rows per hosts/services (default 20)"}}, []),
+    "infiltration.status": _schema(
+        {"engagement_cidr": {**_STR, "description": "Optional declared authorized CIDR for this engagement"}},
+        []),
+    "exploit.intel": _schema(
+        {"ip": {**_STR, "description": "Target host IP (authorized scope)"},
+         "port": {"type": "integer", "description": "Service port"},
+         "service": {**_STR, "description": "Service name"},
+         "banner": {**_STR, "description": "Optional banner string"}},
+        ["ip", "port", "service"]),
+    "exploit.prioritize": _schema(
+        {"limit": {"type": "integer", "description": "Max hosts to return (default 20)"},
+         "cidr": {**_STR, "description": "Optional CIDR prefix filter"}},
+        []),
+    "exploit.chain": _schema(
+        {"ip": {**_STR}, "port": {"type": "integer"}, "service": {**_STR},
+         "banner": {**_STR, "description": "Optional banner"}},
+        ["ip", "port", "service"]),
+    "exploit.gaps": _schema(
+        {"cidr": {**_STR, "description": "Optional engagement CIDR"},
+         "gateway": {**_STR, "description": "Optional gateway IP for scope notes"}},
+        []),
+    "exploit.cve_map": _schema(
+        {"limit": {"type": "integer", "description": "Max rows (default 30)"},
+         "enrich": {"type": "boolean", "description": "Fetch NVD samples for top CVEs"}},
+        []),
+    "reverse.identify": _schema({"path": {**_STR, "description": "Absolute path to local file"}}, ["path"]),
+    "reverse.strings": _schema(
+        {"path": {**_STR}, "min_len": {"type": "integer", "description": "Minimum string length (default 6)"}},
+        ["path"]),
+    "reverse.scan": _schema({"path": {**_STR, "description": "Path to firmware/binary sample"}}, ["path"]),
+    "reverse.symbols": _schema({"path": {**_STR}}, ["path"]),
+    "reverse.analyze": _schema(
+        {"path": {**_STR},
+         "include_strings": {"type": "boolean", "description": "Include strings pass (default true)"}},
+        ["path"]),
+    "loopfreak.pulse": _schema(
+        {"engagement_cidr": {**_STR, "description": "Optional authorized CIDR"}},
+        []),
+    "loopfreak.cycle": _schema(
+        {"max_rounds": {"type": "integer", "description": "Max rounds (default 5)"},
+         "engagement_cidr": {**_STR},
+         "stop_on_plateau": {"type": "boolean", "description": "Stop when host count flat (default true)"}},
+        []),
+    "loopfreak.status": _schema({}, []),
+    "interpreter.run": _schema(
+        {"code": {**_STR, "description": "Python source to execute in persistent session"}},
+        ["code"]),
+    "interpreter.bash": _schema(
+        {"code": {**_STR, "description": "Bash snippet (one-shot)"}},
+        ["code"]),
+    "interpreter.reset": _schema({}, []),
+    "interpreter.status": _schema({}, []),
     "web.exploit_surface": _schema(
         {"ip": {**_STR, "description": "Target host IP (authorized scope only)"},
          "port": {"type": "integer", "description": "Service port"},

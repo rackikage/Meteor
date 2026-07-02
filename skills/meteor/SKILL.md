@@ -1,6 +1,6 @@
 ---
 name: meteor
-description: Drives Meteor's local MCP arsenal (75 tools) for filesystem, shell, nmap, pentest, graph, grinder, and weapon wrappers. Use when the user asks for Meteor, KITT, local recon, network scope, nmap, nuclei, sqlmap, hydra, arsenal detect/run, or mounting meteor-mcp in Cursor.
+description: Drives Meteor's local MCP arsenal (97 tools) for filesystem, shell, interpreter, nmap, pentest, graph, grinder, exploit, infiltration, and weapon wrappers. Use when the user asks for Meteor, KITT, Loop Freak, local recon, network scope, nmap, nuclei, sqlmap, hydra, arsenal detect/run, or mounting meteor-mcp in Cursor.
 ---
 
 # Meteor MCP Arsenal

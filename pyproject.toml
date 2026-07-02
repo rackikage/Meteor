@@ -24,10 +24,13 @@ dependencies = [
     "PyQt6>=6.6",
     "PyQt6-WebEngine>=6.6",
     "mcp>=1.0",
+    "prompt_toolkit>=3.0",
+    "rich>=13.0",
 ]
 
 [project.scripts]
 meteor-mcp = "app.mcp.server:main"
+meteor-chat = "app.terminal.main:main"
 
 [project.optional-dependencies]
 llama = [

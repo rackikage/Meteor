@@ -43,6 +43,11 @@ from app.agent.kitt import (
     parse_plan,
     recovery_hint,
 )
+from app.agent.loop_freak import (
+    LoopFreakConfig,
+    build_loop_freak_prompt,
+    continue_nudge as loop_freak_continue_nudge,
+)
 from app.models.contract import ModelAdapter, ModelInput
 from app.runtime.danger import classify_danger
 from app.runtime.tool_executor import ToolExecutor, ToolResult, ToolResultStatus
@@ -86,6 +91,8 @@ class AgentTurn:
     # gets after a transient error, and the base backoff between attempts.
     max_tool_retries: int = 2
     retry_backoff_s: float = 0.5
+    # Persona: "kitt" (default) or "loop_freak" for aggressive loop mode.
+    persona: str = "kitt"
 
 
 # The agent persona and tool manual now live in app/agent/kitt.py — the loop is
@@ -130,7 +137,26 @@ class AgentChatLoop:
         `confirm`, when provided, is called for catastrophic tool calls with
         {tool, operation, params, reason}; returning False skips the call.
         """
-        system_prompt = self._system_prompt_override or build_system_prompt(self.tools)
+        lf_cfg = LoopFreakConfig()
+        is_loop_freak = turn.persona == "loop_freak"
+        if is_loop_freak:
+            if turn.max_iterations == 12:
+                turn.max_iterations = lf_cfg.max_iterations
+            if turn.max_tool_retries == 2:
+                turn.max_tool_retries = lf_cfg.max_tool_retries
+
+        if self._system_prompt_override:
+            system_prompt = self._system_prompt_override
+        elif is_loop_freak:
+            system_prompt = build_loop_freak_prompt(self.tools)
+        else:
+            system_prompt = build_system_prompt(self.tools)
+
+        continue_msg = (
+            loop_freak_continue_nudge(lf_cfg)
+            if is_loop_freak
+            else "Continue: call more tools OR give the user the final answer."
+        )
 
         conversation: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
         for msg in turn.history:
@@ -198,7 +224,7 @@ class AgentChatLoop:
                 "role": "user",
                 "content": (
                     "\n\n".join(feedback_blocks)
-                    + "\n\nContinue: call more tools OR give the user the final answer."
+                    + f"\n\n{continue_msg}"
                 ),
             })
 

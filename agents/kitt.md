@@ -19,7 +19,9 @@ Mount **meteor** MCP (`meteor-mcp`). Tool names use `__` not `.`:
 - `grinder__grind_subnet`, `graph__query`, `graph__counts`
 - `arsenal__detect`, `nuclei__scan`, `sqlmap__scan`, …
 
-**75 capabilities** when fully unscoped; fewer under `METEOR_MCP_READ_ONLY` or profile filters.
+**97 capabilities** when fully unscoped; fewer under `METEOR_MCP_READ_ONLY` or profile filters.
+
+See [`docs/mcp-arsenal.md`](../docs/mcp-arsenal.md) for how MCP works.
 
 ## Fluid fight doctrine
 

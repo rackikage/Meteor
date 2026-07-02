@@ -65,6 +65,8 @@ class TestReadOnly:
         assert self.p.is_visible("filesystem", "read")
         assert self.p.gate("filesystem", "read", {"path": "/etc/hostname"}) is None
         assert self.p.gate("graph", "query", {"sql": "SELECT 1"}) is None
+        assert self.p.gate("infiltration", "footprint", {}) is None
+        assert self.p.gate("infiltration", "intercept", {}) is None
 
 
 # ── ALLOWED_CIDR ─────────────────────────────────────────────────────────────

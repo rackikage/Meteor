@@ -26,9 +26,56 @@ The MCP server is a **projection** of `ToolExecutor.CAPABILITIES`, not a second
 tool definition. Add a capability anywhere and it appears in both the app and
 MCP automatically — they can never drift.
 
+## How MCP works (step by step)
+
+1. **Client starts subprocess** — Cursor/Claude Code runs `meteor-mcp` (stdio). No TCP port; stdin/stdout JSON-RPC.
+
+2. **`build_server()` bootstraps once** (`app/mcp/server.py`):
+   - `bootstrap_tools()` → every tool in `SystemToolRegistry`
+   - `McpPolicy.from_env()` → read `METEOR_MCP_*` gates
+   - Optional `METEOR_MCP_ALLOWED_ROOT` → re-register chrooted filesystem
+   - `ToolExecutor()` → shared executor the desktop app also uses
+
+3. **`list_tools`** — iterates `ToolExecutor.CAPABILITIES`, filters by policy visibility, exposes each as:
+   - **MCP name:** `tool__operation` (dots → double underscore, e.g. `graph__query`)
+   - **Description + JSON Schema** from `CAPABILITY_SCHEMAS`
+
+4. **`call_tool(name, arguments)`** — for each invocation:
+   ```
+   classify_danger()  → REFUSED if catastrophic (unless ALLOW_DANGER)
+   policy.gate()    → REFUSED if read-only / out of CIDR / offensive without scope
+   executor.execute() → registry.get(tool).method(**params)
+   ```
+   Execution runs in a worker thread (`anyio.to_thread`) so slow scans don't block the event loop.
+
+5. **Response** — JSON text payload: `{ status, tool, duration_ms, result, error }`.
+
+6. **Headless graph** — first grinder/graph call triggers `get_asset_context()` → `build_headless_context()` (`app/mcp/context.py`) so MCP works without uvicorn.
+
+7. **KITT instructions** — server `instructions` field = condensed orchestration from `build_mcp_instructions()` (`app/agent/kitt.py`).
+
+### Name mapping
+
+| In-app / CAPABILITIES | MCP tool name |
+|----------------------|---------------|
+| `filesystem.read` | `filesystem__read` |
+| `grinder.grind_subnet` | `grinder__grind_subnet` |
+| `exploit.chain` | `exploit__chain` |
+
+### Key files
+
+| File | Role |
+|------|------|
+| `app/mcp/server.py` | stdio MCP server, list/call |
+| `app/mcp/policy.py` | env gates (read-only, CIDR, profile) |
+| `app/mcp/context.py` | headless graph + grinder for standalone MCP |
+| `app/runtime/tool_executor.py` | `CAPABILITIES` + execute |
+| `app/tools/bootstrap.py` | register all tools |
+| `scripts/run-meteor-mcp.sh` | Cursor plugin entry |
+
 ## What's exposed
 
-Every capability in the tool core — **75** as of writing:
+Every capability in the tool core — **97** as of writing (regenerate: `./scripts/generate-tools-doc.py`):
 
 - **filesystem** — read, write, **edit** (surgical), append, list, walk, grep, glob, stat, hash, …
 - **shell** — full bash, no blocklist
@@ -37,7 +84,12 @@ Every capability in the tool core — **75** as of writing:
 - **pentest** — kernel posture, firewall graph, async probe engine
 - **grinder** — autonomous host/subnet/sector scanning into the asset graph
 - **graph** — asset-graph schema/tables/counts + read-only SQL over discoveries
-- **web** — CVE (NVD), Exploit-DB, web search
+- **infiltration** — footprint + intercept pipeline (passive scope, bus intel, graph peek — not C2)
+- **exploit** — intel, prioritize, chains, gaps, cve_map (research — no payloads)
+- **reverse** — static RE: identify, strings, binwalk scan, symbols, analyze
+- **loopfreak** — multi-round recon pulse until graph plateaus
+- **interpreter** — Open Interpreter-style local Python/bash (no R/B shells)
+- **web** — CVE (NVD), Exploit-DB, web search, exploit-surface research
 - **arsenal.detect** — what pentest tools are installed, grouped by pipeline phase
 - **arsenal.run** — run any installed tool with structured output
 - **weapon wrappers** — `sqlmap`, `nuclei`, `nikto`, `whatweb`, `wpscan`,
@@ -78,8 +130,57 @@ transient retries on safe ops, structured recovery). External MCP clients get
 the same fight doctrine via server `instructions` and the Cursor kit:
 
 - `agents/kitt.md` — battle-ready operator agent
-- `skills/kitt/SKILL.md` — fluid chain: `arsenal__detect` → `network__scope` →
-  map → `graph__query` → typed weapons
+- `skills/kitt/SKILL.md` — fluid chain: `infiltration__footprint` → `arsenal__detect` →
+  map → `infiltration__intercept` → `graph__query` → typed weapons
+
+## Infiltration pipeline (not a botnet)
+
+Meteor exposes a **single-operator infiltration pipeline** for authorized engagements —
+not distributed C2, not wiretapping third-party traffic:
+
+```
+footprint (passive) → grinder/nmap (active, gated) → intercept (bus intel) → graph (memory)
+```
+
+| Capability | What it does |
+|------------|--------------|
+| `infiltration.footprint` | Local network scope, graph/grinder stats, arsenal detect, suggested next steps |
+| `infiltration.intercept` | Drain discovery events your grinder published on the asset bus |
+| `infiltration.peek` | Latest hosts/services already in the graph |
+| `infiltration.status` | All of the above in one snapshot |
+
+These work under the default MCP posture (no `ALLOWED_CIDR` required). Active scanning
+stays in `grinder.*` / `nmap.*` and remains offensive-gated.
+
+## Exploit layer (research only)
+
+Five capabilities — intel and prioritization, not payload generation:
+
+| Capability | Role |
+|------------|------|
+| `exploit.intel` | CVE + Exploit-DB + attack score for one service |
+| `exploit.prioritize` | Rank graph hosts by ports + stored CVEs |
+| `exploit.chain` | Authorized scanner playbook for a fingerprint |
+| `exploit.gaps` | Firewall/perimeter gaps + 2027 defensive context |
+| `exploit.cve_map` | Graph vulnerability rows (+ optional NVD enrich) |
+
+See `docs/firewalls-network-security-2027.md` for SASE/ZTNA/NDR context.
+
+## Reverse engineering
+
+Static analysis on **local authorized files** — `reverse.analyze` for a full report.
+See `docs/reverse-engineering.md`.
+
+## Loop Freak & interpreter
+
+| Tool | Role |
+|------|------|
+| `loopfreak.cycle` | Headless footprint → intercept → prioritize loop |
+| `loopfreak.pulse` | Single round |
+| `interpreter.run` | Persistent local Python session |
+| `interpreter.bash` | One-shot bash (blocks reverse/bind patterns) |
+
+See `agents/loop-freak.md`, `docs/interpreter.md`.
 
 ## Safety
 

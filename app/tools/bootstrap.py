@@ -261,6 +261,131 @@ class GraphTool:
         return {"healthy": True, "backend": "graph"}
 
 
+class InfiltrationTool:
+    """Authorized infiltration pipeline layers (footprint + intercept).
+
+    Single-operator recon — NOT distributed C2. Active scanning stays in
+    ``grinder.*`` and ``nmap.*`` with separate MCP scope gates."""
+
+    def __init__(self) -> None:
+        from app.infiltration.pipeline import InfiltrationPipeline
+        self._pipeline = InfiltrationPipeline()
+
+    def footprint(self, engagement_cidr: str = "") -> dict:
+        return self._pipeline.footprint(engagement_cidr=engagement_cidr)
+
+    def intercept(self, max_events: int = 200) -> dict:
+        return self._pipeline.intercept(max_events=int(max_events))
+
+    def peek(self, limit: int = 20) -> dict:
+        return self._pipeline.peek(limit=int(limit))
+
+    def status(self, engagement_cidr: str = "") -> dict:
+        return self._pipeline.status(engagement_cidr=engagement_cidr)
+
+    def health(self) -> dict:
+        return {"healthy": True, "backend": "infiltration_pipeline"}
+
+
+class ExploitTool:
+    """Exploit research layer — CVE intel, prioritization, chains, gaps (no payloads)."""
+
+    def __init__(self) -> None:
+        from app.exploit.layer import ExploitLayer
+        self._layer = ExploitLayer()
+
+    def intel(self, ip: str, port: int, service: str, banner: str = "") -> dict:
+        return self._layer.intel(ip=ip, port=int(port), service=service, banner=banner)
+
+    def prioritize(self, limit: int = 20, cidr: str = "") -> dict:
+        return self._layer.prioritize(limit=int(limit), cidr=cidr)
+
+    def chain(self, ip: str, port: int, service: str, banner: str = "") -> dict:
+        return self._layer.chain(ip=ip, port=int(port), service=service, banner=banner)
+
+    def gaps(self, cidr: str = "", gateway: str = "") -> dict:
+        return self._layer.gaps(cidr=cidr, gateway=gateway)
+
+    def cve_map(self, limit: int = 30, enrich: bool = False) -> dict:
+        return self._layer.cve_map(limit=int(limit), enrich=bool(enrich))
+
+    def health(self) -> dict:
+        return {"healthy": True, "backend": "exploit_layer"}
+
+
+class ReverseTool:
+    """Static reverse-engineering helpers for local authorized artifacts."""
+
+    def __init__(self) -> None:
+        from app.reverse.layer import ReverseEngineeringLayer
+        self._layer = ReverseEngineeringLayer()
+
+    def identify(self, path: str) -> dict:
+        return self._layer.identify(path)
+
+    def strings(self, path: str, min_len: int = 6) -> dict:
+        return self._layer.strings(path, min_len=int(min_len))
+
+    def scan(self, path: str) -> dict:
+        return self._layer.scan(path)
+
+    def symbols(self, path: str) -> dict:
+        return self._layer.symbols(path)
+
+    def analyze(self, path: str, include_strings: bool = True) -> dict:
+        return self._layer.analyze(path, include_strings=bool(include_strings))
+
+    def health(self) -> dict:
+        return {"healthy": True, "backend": "reverse_engineering"}
+
+
+class LoopFreakTool:
+    """Multi-round recon loop — footprint/intercept/prioritize until plateau."""
+
+    def __init__(self) -> None:
+        from app.loop_freak.runner import LoopFreakRunner
+        self._runner = LoopFreakRunner()
+
+    def pulse(self, engagement_cidr: str = "") -> dict:
+        return self._runner.pulse(engagement_cidr=engagement_cidr)
+
+    def cycle(self, max_rounds: int = 5, engagement_cidr: str = "", stop_on_plateau: bool = True) -> dict:
+        return self._runner.cycle(
+            max_rounds=int(max_rounds),
+            engagement_cidr=engagement_cidr,
+            stop_on_plateau=bool(stop_on_plateau),
+        )
+
+    def status(self) -> dict:
+        return self._runner.status()
+
+    def health(self) -> dict:
+        return {"healthy": True, "backend": "loop_freak"}
+
+
+class InterpreterTool:
+    """Open Interpreter-style local Python/bash execution (not R/B shells)."""
+
+    def __init__(self) -> None:
+        from app.interpreter.local import LocalInterpreter
+        self._interp = LocalInterpreter()
+
+    def run(self, code: str) -> dict:
+        return self._interp.run(code)
+
+    def bash(self, code: str) -> dict:
+        return self._interp.run_bash(code)
+
+    def reset(self) -> dict:
+        return self._interp.reset()
+
+    def status(self) -> dict:
+        return self._interp.status()
+
+    def health(self) -> dict:
+        return {"healthy": True, "backend": "interpreter"}
+
+
 # ── Bootstrap ────────────────────────────────────────────────────────────
 
 def bootstrap_tools(storage: Any = None) -> SystemToolRegistry:
@@ -322,6 +447,31 @@ def bootstrap_tools(storage: Any = None) -> SystemToolRegistry:
     registry.register("network", NetworkScopeTool(), "Local network scope (gateway/CIDR)", version="1.0")
     registry.register("grinder", GrinderTool(), "Autonomous host/subnet/sector grinding into the asset graph", version="1.0")
     registry.register("graph", GraphTool(), "Asset graph schema/tables/counts + read-only SQL", version="1.0")
+    registry.register(
+        "infiltration", InfiltrationTool(),
+        "Footprint + intercept pipeline (authorized single-operator recon, not C2)",
+        version="1.0",
+    )
+    registry.register(
+        "exploit", ExploitTool(),
+        "Exploit research layer — intel, prioritize, chains, gaps (no payloads)",
+        version="1.0",
+    )
+    registry.register(
+        "reverse", ReverseTool(),
+        "Static reverse engineering — identify, strings, binwalk scan, symbols",
+        version="1.0",
+    )
+    registry.register(
+        "loopfreak", LoopFreakTool(),
+        "Loop Freak — multi-round recon pulse until graph plateaus",
+        version="1.0",
+    )
+    registry.register(
+        "interpreter", InterpreterTool(),
+        "Open Interpreter-style local Python/bash (no reverse/bind shells)",
+        version="1.0",
+    )
     try:
         registry.register("web", WebIntelTool(), "Live web intel — CVE/NVD, Exploit-DB, web search", version="1.0")
     except Exception as exc:

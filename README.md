@@ -68,6 +68,9 @@ then **weaves the findings into a normal reply** (you never see the raw calls):
 - **network** — local gateway / CIDR / priority-target discovery
 - **nmap** — scan, discover, service/version, NSE scripts
 - **pentest** — kernel firewall posture, perimeter graph analysis, async TCP probe engine
+- **grinder / graph** — autonomous scanning into SQLite asset graph; read-only SQL queries
+- **infiltration / exploit / reverse** — footprint/intercept pipeline, CVE prioritization, static RE
+- **interpreter / loopfreak** — local Python REPL; multi-round recon cycles
 - **browser** — read page, fill, click, run JS (Playwright, opt-in)
 - **clipboard · notify · keychain · scheduler** — desktop integration
 
@@ -91,16 +94,11 @@ mount it and wield the arsenal:
 claude mcp add meteor -- /path/to/Meteor/.venv/bin/meteor-mcp
 ```
 
-All 75 capabilities become MCP tools (one source of truth — the app and MCP
-never drift). Catastrophic actions are refused on the MCP channel by default
-since no human is there to confirm. See [`docs/mcp-arsenal.md`](docs/mcp-arsenal.md).
+All **97** capabilities become MCP tools (`tool__operation` names). One source of truth — the app and MCP never drift. Catastrophic actions are refused on the MCP channel by default since no human is there to confirm. See [`docs/mcp-arsenal.md`](docs/mcp-arsenal.md) for the full MCP flow.
 
 ### KITT — the operator persona
 
-The in-app agent loop runs **KITT** (*Kinetic Infiltration & Tooling Twin*): a
-friendly, battle-ready partner that chains all 75 tools fluidly — parallel reads,
-sequential offensive ops, multi-step plans, transient retries on safe ops, and
-structured recovery on failures. See [`app/agent/kitt.py`](app/agent/kitt.py).
+The in-app agent loop runs **KITT** (*Kinetic Infiltration & Tooling Twin*): chains tools fluidly — parallel reads, sequential offensive ops, plans, retries. **Loop Freak** (`persona=loop_freak`) bumps iteration budget. **Interpreter** (`interpreter__run`) = Open Interpreter-style local Python. See [`app/agent/kitt.py`](app/agent/kitt.py).
 
 External MCP clients get the same orchestration doctrine via server instructions
 and the [`agents/kitt.md`](agents/kitt.md) Cursor agent.
@@ -130,7 +128,7 @@ mkdir -p ~/.cursor/plugins/local
 ln -sf "$(pwd)" ~/.cursor/plugins/local/meteor
 ```
 
-Reload Cursor, enable the **meteor** plugin, then verify ~75 tools in MCP settings.
+Reload Cursor, enable the **meteor** plugin, then verify ~97 tools in MCP settings.
 Use the **kitt** agent for fluid recon/pentest orchestration.
 
 ## Talking to it
