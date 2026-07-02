@@ -33,7 +33,7 @@
     },
     "webfetch": "ask"
   },
-  "agents": {
+  "agent": {
     "build": {
       "tools": {
         "write": true,
