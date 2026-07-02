@@ -12,6 +12,7 @@ Supports two modes:
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from typing import Optional
 

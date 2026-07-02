@@ -32,10 +32,14 @@ def bootstrap(config_path: Path = CONFIG_PATH) -> BootstrapResult:
     if default_profile is None:
         raise ValueError(f"Default model profile '{default_profile_name}' not found in config.")
 
+    # Only llama.cpp profiles resolve model_path against the filesystem —
+    # hosted backends (Pollinations, Groq, Cerebras, Gemini) use it as a
+    # remote model id, and Ollama uses it as a tag. Skip the fs check for
+    # anything else so the default hosted profile doesn't spuriously warn.
     model_path = Path(default_profile.model_path)
     if not model_path.is_absolute():
         model_path = (repo_root / model_path).resolve(strict=False)
-    if not model_path.exists():
+    if default_profile.backend.lower() == "llama_cpp" and not model_path.exists():
         warnings.append(f"Model file not found: {model_path}. Runtime will not be able to execute inference.")
 
     ready = len(warnings) == 0

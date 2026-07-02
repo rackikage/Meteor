@@ -5,12 +5,12 @@ app:
   debug: false
 
 models:
-  # Effective default is auto-upgraded to a hosted-free profile when its API key
-  # is set (GROQ_API_KEY, CEREBRAS_API_KEY, GEMINI_API_KEY, TOGETHER_API_KEY,
-  # OPENROUTER_API_KEY). No key present → falls back to the local Ollama default
-  # below. This keeps Meteor local-first by default, fast-when-you-plug-in.
-  # Keyless free hosted API works out of the box on any wifi — no signup.
-  # Auto-upgrades to Groq/Cerebras/Gemini if you set the matching API key.
+  # Meteor is an MCP kit — the product is the tool core, driven by external
+  # agents (Cursor, Claude Code, OpenCode) over meteor-mcp. The chat sidekick
+  # is optional and uses hosted APIs only: keyless Pollinations by default,
+  # auto-upgraded to Groq/Cerebras/Gemini/Together/OpenRouter when their API
+  # key is present. No local inference (Ollama, llama.cpp) in this build —
+  # the tools are what matter, not the brain.
   default_profile: pollinations-free
   profiles:
     # ── Keyless free hosted (Pollinations) ────────────────────────────
@@ -80,62 +80,10 @@ models:
       wired: true
       base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
       role: heavy
-    # Slow-but-smart local model. Selected via the GUI "smart" toggle.
-    ollama-heavy:
-      backend: ollama
-      model_path: "qwen2.5-coder:32b"
-      context_window: 32768
-      temperature: 0.4
-      temperature_structured: 0.15
-      temperature_creative: 0.7
-      max_tokens: 2048
-      wired: true
-      base_url: "http://localhost:11434"
-      role: heavy
-    # Blazing-fast local model. Default. 7B code-tuned; ~80–100 tok/s on modern
-    # hardware and still capable at agentic tool use.
-    ollama-fast:
-      backend: ollama
-      model_path: "qwen2.5-coder:7b"
-      context_window: 8192
-      temperature: 0.4
-      temperature_structured: 0.15
-      temperature_creative: 0.7
-      max_tokens: 1024
-      wired: true
-      base_url: "http://localhost:11434"
-      role: fast
-    ollama-coder:
-      backend: ollama
-      model_path: "qwen2.5-coder:14b"
-      context_window: 8192
-      temperature: 0.3
-      temperature_structured: 0.15
-      temperature_creative: 0.6
-      max_tokens: 1024
-      wired: true
-      base_url: "http://localhost:11434"
-      role: default
-    ollama-local:
-      backend: ollama
-      model_path: "mistral-nemo:12b"
-      context_window: 8192
-      temperature: 0.7
-      temperature_structured: 0.2
-      temperature_creative: 0.85
-      max_tokens: 1024
-      wired: true
-      base_url: "http://localhost:11434"
-      role: default
-    llama3.2-3b-local:
-      backend: llama_cpp
-      model_path: "llama3.2-3b.gguf"
-      context_window: 4096
-      temperature: 0.7
-      temperature_structured: 0.2
-      temperature_creative: 0.8
-      max_tokens: 512
-      wired: true
+    # Local inference profiles (Ollama, llama.cpp) are intentionally omitted.
+    # Meteor's value is the tool bridge, not shipping a bundled brain — external
+    # agents already have their own model. Re-add here if you want to drive the
+    # optional in-app chat with a local model; nothing else in Meteor needs it.
 
 policy:
   default_action: deny

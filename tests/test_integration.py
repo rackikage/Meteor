@@ -195,12 +195,14 @@ def test_health_aggregation(runtime_components) -> None:
 
 
 def test_model_registry_initialization(tmp_path) -> None:
-    """Test that model registry initializes with config."""
+    """Model registry initializes with hosted-only default profiles — Meteor's
+    MCP kit does not ship local inference in the default config."""
     config = MeteorConfig.load(CONFIG_PATH)
     registry = ModelRegistry(config, tmp_path)
 
     profiles = registry.list_profiles()
-    assert "llama3.2-3b-local" in profiles
+    assert "pollinations-free" in profiles
+    assert config.models.default_profile in profiles
 
 
 def test_bootstrap_integration() -> None:

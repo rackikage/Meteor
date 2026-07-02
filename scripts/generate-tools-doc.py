@@ -21,14 +21,15 @@ def main() -> None:
     lines = [
         "# Meteor Tools",
         "",
-        "Every capability Meteor can invoke, grouped by tool. Meteor selects these on its own — "
-        "no bias toward any one tool — and folds the results into a normal reply. Calls are "
-        "dispatched through [`app/runtime/tool_executor.py`](../app/runtime/tool_executor.py) "
-        "and registered permissively in [`app/tools/bootstrap.py`](../app/tools/bootstrap.py).",
+        "Every capability the Meteor MCP kit projects, grouped by tool. Any MCP-capable agent "
+        "(Claude Code, Cursor, OpenCode) mounts `meteor-mcp` and drives these directly — no "
+        "bias toward any one tool. Calls are dispatched through "
+        "[`app/runtime/tool_executor.py`](../app/runtime/tool_executor.py) and registered in "
+        "[`app/tools/bootstrap.py`](../app/tools/bootstrap.py).",
         "",
         f"**{len(caps)} capabilities across {len(tools)} tools.** "
-        "Generated from `ToolExecutor.CAPABILITIES` — the single source of truth the desktop app "
-        "and the MCP server both project.",
+        "Generated from `ToolExecutor.CAPABILITIES` — the single source of truth every "
+        "consumer (MCP server, optional REPL, in-process runtime) projects.",
         "",
         "Regenerate: `./scripts/generate-tools-doc.py`",
         "",

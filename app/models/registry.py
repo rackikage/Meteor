@@ -84,12 +84,11 @@ class ModelRegistry:
         return self.config.models.default_profile
 
     def profile_for_role(self, role: str) -> Optional[str]:
-        """Pick the best available profile for a role ("fast"/"heavy") using the
-        same hosted-first priority as the default selection: a hosted backend
-        whose key is set (Groq → Cerebras → Gemini → Together → OpenRouter),
-        then keyless Pollinations, then any non-Ollama match, and finally Ollama
-        (offline fallback). This keeps the fast/smart toggle on the fast hosted
-        path instead of dropping to a local model that may not be running."""
+        """Pick the best available profile for a role ("fast"/"heavy"): a hosted
+        backend whose key is set (Groq → Cerebras → Gemini → Together →
+        OpenRouter), then keyless Pollinations, then any other match. Local
+        inference profiles are not shipped with Meteor's default config, so
+        this path never has to hit Ollama."""
         profiles = self.config.models.profiles
         priority = ("groq", "cerebras", "gemini_openai", "together", "openrouter")
         for backend in priority:
@@ -101,9 +100,6 @@ class ModelRegistry:
                     return name
         for name, prof in profiles.items():
             if prof.backend.lower() == "pollinations" and prof.role == role:
-                return name
-        for name, prof in profiles.items():
-            if prof.role == role and prof.backend.lower() != "ollama":
                 return name
         for name, prof in profiles.items():
             if prof.role == role:

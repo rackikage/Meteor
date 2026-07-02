@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,38 @@ from app.tools.system.registry import SystemToolRegistry, ToolAccess, ToolCapabi
 from app.tools.system.ui_automation import UIAutomation, Platform
 from app.tools.system.ipc import IPCManager, IPCEndpoint
 from app.tools.system.browser_bridge import BrowserBridge, BrowserConfig
+
+
+def _clipboard_available() -> bool:
+    if os.uname().sysname == "Darwin":
+        return shutil.which("pbcopy") is not None
+    if os.uname().sysname == "Linux":
+        return shutil.which("wl-copy") is not None or shutil.which("xclip") is not None
+    return False
+
+
+def _keychain_native_available() -> bool:
+    if os.uname().sysname == "Darwin":
+        return shutil.which("security") is not None
+    if os.uname().sysname == "Linux":
+        # secret-tool needs both the binary and a running D-Bus / secret service
+        # (gnome-keyring, kwallet, KeePassXC). On headless CI there's a binary
+        # but no session bus, so the store silently no-ops — treat that as
+        # unavailable.
+        if shutil.which("secret-tool") is None:
+            return False
+        return bool(os.environ.get("DBUS_SESSION_BUS_ADDRESS"))
+    return False
+
+
+needs_clipboard = pytest.mark.skipif(
+    not _clipboard_available(),
+    reason="no clipboard tool installed (wl-clipboard / xclip / pbcopy)",
+)
+needs_keychain = pytest.mark.skipif(
+    not _keychain_native_available(),
+    reason="no native keychain backend available (macOS security / Linux secret-tool + D-Bus)",
+)
 
 
 class TestFilesystemAgent:
@@ -184,6 +217,7 @@ class TestProcessManager:
         assert stats is not None
 
 
+@needs_clipboard
 class TestClipboardManager:
 
     @pytest.fixture
@@ -239,6 +273,7 @@ class TestKeychainManager:
     def kc(self):
         return KeychainManager()
 
+    @needs_keychain
     def test_store_and_retrieve(self, kc):
         kc.store("meteor-test", "api-key", "sk-test123")
         assert kc.retrieve("meteor-test", "api-key") == "sk-test123"

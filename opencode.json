@@ -1,0 +1,52 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "agents/kitt.md",
+    "agents/loop-freak.md"
+  ],
+  "mcp": {
+    "meteor": {
+      "type": "local",
+      "command": ["bash", "./scripts/run-meteor-mcp.sh"],
+      "enabled": true,
+      "environment": {
+        "METEOR_LOG_LEVEL": "WARNING"
+      }
+    }
+  },
+  "permission": {
+    "edit": "ask",
+    "bash": {
+      "ls *": "allow",
+      "cat *": "allow",
+      "rg *": "allow",
+      "grep *": "allow",
+      "git status": "allow",
+      "git diff *": "allow",
+      "git log *": "allow",
+      "pytest *": "allow",
+      "python -m pytest *": "allow",
+      "meteor-chat *": "allow",
+      "rm -rf *": "deny",
+      "sudo rm *": "deny",
+      "*": "ask"
+    },
+    "webfetch": "ask"
+  },
+  "agents": {
+    "build": {
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true
+      }
+    },
+    "plan": {
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": false
+      }
+    }
+  }
+}

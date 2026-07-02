@@ -132,3 +132,17 @@ MCP tool names use `__` not `.` (`graph__query`). Headless graph/grinder: `app/m
 - [ ] README section: Quick start for Cursor **and** OpenCode **and** `meteor-chat`
 
 When done, reply with: commit SHA, push confirmation, capability count, test summary, and exact commands for the operator to reload Cursor MCP and try OpenCode.
+
+## Operator handoff (after Opus completes)
+
+```bash
+cd ~/Meteor && git pull origin main
+pip install -e .
+# Cursor: Developer → Reload Window, enable meteor MCP
+# OpenCode: opencode from repo root (reads opencode.json)
+meteor-chat                    # live KITT terminal session
+meteor-chat --persona loop_freak
+export METEOR_MCP_ALLOWED_CIDR=10.0.0.0/24   # unlock offensive MCP tools when scoped
+```
+
+Optional API keys (`GROQ_API_KEY`, etc.) upgrade the in-app model; MCP tools work regardless.

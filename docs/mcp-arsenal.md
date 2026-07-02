@@ -1,9 +1,9 @@
 # Meteor as an MCP arsenal
 
-Meteor is not just a standalone app — it's a **weapon any capable AI can drive**.
-The `meteor-mcp` server exposes Meteor's entire tool core over the Model Context
-Protocol (stdio), so a stronger brain than Meteor's built-in Groq loop — Claude
-Code, Cursor, another agent — can mount it and wield the whole arsenal.
+Meteor **is** an MCP arsenal — a stdio server (`meteor-mcp`) that exposes a
+hardened local tool core over the Model Context Protocol. Any MCP-capable
+agent — **Claude Code**, **Cursor**, **OpenCode** — mounts it and wields the
+whole thing. Meteor doesn't ship a brain; you bring one.
 
 ## Architecture: one tool core, three consumers
 
@@ -16,15 +16,15 @@ Code, Cursor, another agent — can mount it and wield the whole arsenal.
               ┌────────────────────┼────────────────────┐
               ▼                    ▼                     ▼
      ┌────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-     │  Desktop app   │  │  meteor-mcp      │  │  (future clients)│
-     │  (Groq loop +  │  │  stdio server —  │  │                  │
-     │   pywebview)   │  │  any AI drives it│  │                  │
+     │  meteor-mcp    │  │  meteor-chat     │  │  MeteorAgent     │
+     │  (stdio MCP —  │  │  (optional REPL, │  │  (in-process     │
+     │   the product) │  │   KITT/LoopFreak)│  │   API runtime)   │
      └────────────────┘  └──────────────────┘  └──────────────────┘
 ```
 
-The MCP server is a **projection** of `ToolExecutor.CAPABILITIES`, not a second
-tool definition. Add a capability anywhere and it appears in both the app and
-MCP automatically — they can never drift.
+The MCP server is a **projection** of `ToolExecutor.CAPABILITIES`, not a
+second tool definition. Add a capability anywhere and it appears in every
+consumer automatically — they can never drift.
 
 ## How MCP works (step by step)
 
@@ -34,7 +34,7 @@ MCP automatically — they can never drift.
    - `bootstrap_tools()` → every tool in `SystemToolRegistry`
    - `McpPolicy.from_env()` → read `METEOR_MCP_*` gates
    - Optional `METEOR_MCP_ALLOWED_ROOT` → re-register chrooted filesystem
-   - `ToolExecutor()` → shared executor the desktop app also uses
+   - `ToolExecutor()` → shared executor every consumer projects
 
 3. **`list_tools`** — iterates `ToolExecutor.CAPABILITIES`, filters by policy visibility, exposes each as:
    - **MCP name:** `tool__operation` (dots → double underscore, e.g. `graph__query`)
@@ -210,7 +210,7 @@ default above. They only ever *tighten* access.
 |---------|--------|
 | `METEOR_MCP_ALLOWED_CIDR=10.0.0.0/24` | Unlocks offensive tools **and** restricts every target-taking tool (grinder, nmap, weapons) to hosts inside the CIDR. URLs are host-parsed; domain-name tools (`dnsrecon`, `gobuster.dns`) can't be IP-scoped and are allowed through once a scope is set. |
 | `METEOR_MCP_READ_ONLY=1` | Hides and refuses every mutating/active op — `shell`, filesystem writes, `process.kill`, weapons, `grinder.*`, `nmap`, keychain/scheduler/clipboard writes, browser input. Leaves reads, `graph`, `web`, `arsenal.detect`, local posture (≈33 tools). |
-| `METEOR_MCP_ALLOWED_ROOT=/path` | Re-registers the filesystem tool chrooted to `/path` for the MCP process only (the desktop app stays rooted at `/`). |
+| `METEOR_MCP_ALLOWED_ROOT=/path` | Re-registers the filesystem tool chrooted to `/path` for the MCP process only (the in-process REPL, if used, stays rooted at `/`). |
 | `METEOR_MCP_PROFILE=minimal` | Coarse filter: local + read only; drops all active-network and offensive tools. `full` (default) / `arsenal` expose everything. |
 | `METEOR_MCP_ALLOW_DANGER=1` | Lifts **both** the catastrophic danger gate and the offensive gate — fully unattended. |
 

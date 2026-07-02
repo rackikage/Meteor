@@ -41,10 +41,14 @@ def test_model_adapter_is_abstract() -> None:
 
 
 def test_registry_lists_profiles() -> None:
+    """Default config ships hosted-only profiles (Meteor is an MCP kit, not a
+    local-inference runtime); the keyless Pollinations default is always
+    present, and any Groq/Cerebras/Gemini profiles are optional key-gated."""
     config = MeteorConfig.load(CONFIG_PATH)
     registry = ModelRegistry(config, Path(__file__).resolve().parent.parent)
     profiles = registry.list_profiles()
-    assert "llama3.2-3b-local" in profiles
+    assert "pollinations-free" in profiles
+    assert config.models.default_profile in profiles
 
 
 def test_registry_get_adapter_raises_on_missing_profile() -> None:
@@ -54,11 +58,24 @@ def test_registry_get_adapter_raises_on_missing_profile() -> None:
         registry.get_adapter("nonexistent-profile")
 
 
-def test_registry_get_adapter_raises_on_missing_model_file() -> None:
+def test_registry_get_adapter_raises_on_missing_model_file(tmp_path) -> None:
+    """The llama.cpp adapter still errors cleanly when its model file is
+    missing — verified via a synthetic config, since the default ships hosted
+    profiles only."""
     config = MeteorConfig.load(CONFIG_PATH)
+    config.models.profiles["llama-missing"] = ModelProfile(
+        backend="llama_cpp",
+        model_path="nonexistent.gguf",
+        context_window=4096,
+        temperature=0.7,
+        temperature_structured=0.2,
+        temperature_creative=0.8,
+        max_tokens=512,
+        wired=True,
+    )
     registry = ModelRegistry(config, Path(__file__).resolve().parent.parent)
     with pytest.raises((FileNotFoundError, ImportError)):
-        registry.get_adapter("llama3.2-3b-local")
+        registry.get_adapter("llama-missing")
 
 
 def test_model_profile_has_required_fields() -> None:

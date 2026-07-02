@@ -1,169 +1,176 @@
 # Meteor
 
-> Local-first agentic AI. Your machine. Your rules. Your tools.
+> **MCP kit for driving your machine.** Your tools. Your rules. Any AI.
 
-Meteor is a home-made AI runtime that runs on your box as a **native desktop
-app** with full local permissions — shell, filesystem, processes, networking,
-recon, and desktop integration — and drives them through a Claude Code-style
-agent loop. It talks to you as a single model called **Meteor**; the engine
-behind it is swappable and invisible.
+Meteor is a **Model Context Protocol arsenal** — a stdio server (`meteor-mcp`)
+that projects a hardened local tool core (filesystem, shell, network, nmap,
+pentest weapons, asset graph, autonomous grinder, static RE, interpreter,
+loop-freak recon) to any MCP-capable agent. Mount it in **Claude Code**,
+**Cursor**, **OpenCode**, or anything else that speaks MCP and drive **97
+capabilities** with a single line of config.
 
-Works out of the box on any wifi with **zero setup and no API key** (keyless
-free hosted inference), and can drop to a fully offline local model when you
-want it.
+**Meteor is not a model.** It's the bridge. Your existing agent brings the
+brain; Meteor brings the hands.
 
-## Quick start
+Sudo works — local policy is permissive by default (the machine owner is the
+one running it). The MCP surface is separately gated so external agents get
+read-only unless you unlock them (`METEOR_MCP_ALLOWED_CIDR`, `ALLOW_DANGER`).
+
+## Quick start — mount the MCP kit
 
 ```bash
 git clone https://github.com/rackikage/Meteor.git
 cd Meteor
-./Meteor
+pip install -e .
 ```
 
-First launch creates `.venv`, installs deps, and opens the native window.
-Second launch just opens it. No browser tab, no downloads unless you ask.
+That installs two console scripts:
 
-**Install as a real app** (menu + taskbar icon):
+| Script | What it does |
+|--------|--------------|
+| `meteor-mcp` | stdio MCP server — mount this in your agent |
+| `meteor-chat` | optional REPL (KITT / Loop Freak) if you want a standalone terminal |
 
-```bash
-./install.sh
-```
-
-- **Linux** → registers `meteor.desktop` + icons, then pin from your taskbar.
-- **macOS** → builds `~/Applications/Meteor.app`.
-- **Windows** → Start Menu + Desktop shortcuts (run the PowerShell installer).
-
-> Linux native window uses PyQt6 WebEngine (installed automatically by pip).
-> No `sudo` needed. If you prefer GTK/WebKit2:
-> `sudo apt install python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0`
-
-## The engine
-
-You never pick a model — you talk to **Meteor**. Under the hood it auto-selects
-the fastest backend available to you:
-
-| If this is set        | Meteor runs on                         | Notes                     |
-|-----------------------|----------------------------------------|---------------------------|
-| _(nothing)_           | **Pollinations** (keyless, free)       | Works on any wifi, no key |
-| `GROQ_API_KEY`        | `llama-3.1-8b-instant` on Groq         | ~750 tok/s free tier      |
-| `CEREBRAS_API_KEY`    | `llama-3.3-70b` on Cerebras            | Very fast 70B free tier   |
-| `GEMINI_API_KEY`      | `gemini-2.0-flash-exp`                 | Large context, free       |
-| `TOGETHER_API_KEY`    | Together AI                            | Fallback hosted           |
-| `OPENROUTER_API_KEY`  | OpenRouter                             | Aggregator fallback       |
-| Ollama running        | `qwen2.5-coder` (fast / smart)         | Fully offline fallback    |
-
-Set a key and it's used automatically. Set nothing and Meteor still works.
-The **fast / smart** toggle in the top bar flips between a quick model and a
-slower, more capable one.
-
-## The toolkit
-
-Meteor reaches for any of these on its own — there is no bias toward any one
-tool. It picks the most direct one for the job and chains as many as needed,
-then **weaves the findings into a normal reply** (you never see the raw calls):
-
-- **filesystem** — read, write, list, stat, grep, glob, mkdir, rm, cp, mv, md5, sha256, which (rooted at `/`)
-- **shell** — full shell, no blocklist, `/bin/bash` under the hood
-- **process** — list, kill, system stats
-- **network** — local gateway / CIDR / priority-target discovery
-- **nmap** — scan, discover, service/version, NSE scripts
-- **pentest** — kernel firewall posture, perimeter graph analysis, async TCP probe engine
-- **grinder / graph** — autonomous scanning into SQLite asset graph; read-only SQL queries
-- **infiltration / exploit / reverse** — footprint/intercept pipeline, CVE prioritization, static RE
-- **interpreter / loopfreak** — local Python REPL; multi-round recon cycles
-- **browser** — read page, fill, click, run JS (Playwright, opt-in)
-- **clipboard · notify · keychain · scheduler** — desktop integration
-
-- **arsenal** — `arsenal.detect` reports every installed pentest tool grouped by
-  pipeline phase (recon → forensics); `arsenal.run` executes any of them
-- **weapons** — first-class wrappers for the heavy hitters: `sqlmap`, `nuclei`,
-  `nikto`, `whatweb`, `wpscan`, `gobuster`, `ffuf`, `feroxbuster`, `hydra`,
-  `searchsploit`, `dnsrecon`, `enum4linux`, `smbmap`, `masscan`, `exiftool`, `binwalk`
-
-Every tool is registered permissively for the machine's owner. See
-[`app/tools/bootstrap.py`](app/tools/bootstrap.py) to tighten it, and
-[`docs/tools.md`](docs/tools.md) for the full capability reference.
-
-## Drive it from any AI (MCP)
-
-Meteor's whole tool core is exposed over the Model Context Protocol, so a
-stronger brain than the built-in loop — Claude Code, Cursor, another agent — can
-mount it and wield the arsenal:
+### Claude Code
 
 ```bash
 claude mcp add meteor -- /path/to/Meteor/.venv/bin/meteor-mcp
 ```
 
-All **97** capabilities become MCP tools (`tool__operation` names). One source of truth — the app and MCP never drift. Catastrophic actions are refused on the MCP channel by default since no human is there to confirm. See [`docs/mcp-arsenal.md`](docs/mcp-arsenal.md) for the full MCP flow.
+### Cursor
 
-### KITT — the operator persona
-
-The in-app agent loop runs **KITT** (*Kinetic Infiltration & Tooling Twin*): chains tools fluidly — parallel reads, sequential offensive ops, plans, retries. **Loop Freak** (`persona=loop_freak`) bumps iteration budget. **Interpreter** (`interpreter__run`) = Open Interpreter-style local Python. See [`app/agent/kitt.py`](app/agent/kitt.py).
-
-External MCP clients get the same orchestration doctrine via server instructions
-and the [`agents/kitt.md`](agents/kitt.md) Cursor agent.
-
-### Cursor kit
-
-One-command setup:
+Project config already at [`.cursor/mcp.json`](.cursor/mcp.json) — open this
+repo as your workspace, or symlink it as a local plugin:
 
 ```bash
-./scripts/cursor-mcp-setup.sh
+mkdir -p ~/.cursor/plugins/local && ln -sf "$(pwd)" ~/.cursor/plugins/local/meteor
 ```
 
-Or open this repo as your Cursor workspace — project MCP config is at
-[`.cursor/mcp.json`](.cursor/mcp.json).
+Then reload Cursor and enable the **meteor** plugin. Ships with skills, agents,
+and the KITT operator persona: [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json).
 
-Plugin bundle (skills + KITT agent + MCP wiring):
-[`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json),
-[`skills/meteor/SKILL.md`](skills/meteor/SKILL.md),
-[`skills/kitt/SKILL.md`](skills/kitt/SKILL.md),
-[`agents/kitt.md`](agents/kitt.md),
-[`mcp.json`](mcp.json).
+One-shot installer: `./scripts/cursor-mcp-setup.sh`.
 
-Local plugin test:
+### OpenCode
+
+Project config at [`opencode.json`](opencode.json). From the repo root:
 
 ```bash
-mkdir -p ~/.cursor/plugins/local
-ln -sf "$(pwd)" ~/.cursor/plugins/local/meteor
+opencode
 ```
 
-Reload Cursor, enable the **meteor** plugin, then verify ~97 tools in MCP settings.
-Use the **kitt** agent for fluid recon/pentest orchestration.
+Ships with `.opencode/agents/` (kitt, loop-freak, terminal) and permissive
+read/recon defaults; destructive shell/filesystem writes stay `ask` until you
+override. See [`docs/opencode.md`](docs/opencode.md).
 
-## Talking to it
+## The arsenal
 
-Anything you type is a prompt. Meteor decides whether to answer directly or
-reach for tools, runs them silently, and replies in plain prose.
+**97 capabilities** across one tool core — every consumer (Cursor, Claude
+Code, OpenCode, the optional REPL) sees the same registry. Add a tool once,
+it appears everywhere. Regenerate the full list: `./scripts/generate-tools-doc.py`
+→ [`docs/tools.md`](docs/tools.md).
 
-- `what's eating my CPU right now?`
-- `read /etc/os-release and summarise`
-- `scan the gateway and tell me what's exposed`
-- `find every python file under ~/Meteor that imports requests`
-- `posture check on the local firewall`
+| Domain | What you get |
+|--------|--------------|
+| **filesystem** | read, write, edit (surgical), append, list, walk, grep, glob, stat, hash, md5/sha256, which |
+| **shell / process** | full `/bin/bash`, list, kill, system stats |
+| **network** | local gateway / CIDR / priority-target discovery |
+| **nmap** | scan, discover, service/version, NSE scripts |
+| **pentest** | kernel firewall posture, perimeter graph analysis, async TCP probe engine |
+| **grinder / graph** | autonomous scanning into SQLite asset graph; read-only SQL queries |
+| **infiltration** | `footprint`, `intercept`, `peek`, `status` — passive scope + pipeline drain |
+| **exploit (research)** | `intel`, `prioritize`, `chain`, `gaps`, `cve_map` — CVE/Exploit-DB, no payload gen |
+| **reverse** | static RE on local files — identify, strings, scan, symbols, analyze |
+| **interpreter** | persistent Python + bash REPL (blocks reverse/bind shell patterns) |
+| **loop freak** | multi-round `loopfreak__cycle` — footprint → intercept → prioritize until plateau |
+| **browser** | read page, fill, click, run JS (Playwright, opt-in) |
+| **arsenal** | `arsenal__detect` inventories every installed pentest tool; `arsenal__run` executes any of them |
+| **weapons** | first-class wrappers: `sqlmap`, `nuclei`, `nikto`, `whatweb`, `wpscan`, `gobuster`, `ffuf`, `feroxbuster`, `hydra`, `searchsploit`, `dnsrecon`, `enum4linux`, `smbmap`, `masscan`, `exiftool`, `binwalk` |
+| **desktop** | clipboard, notify, keychain, scheduler |
 
-## Architecture (short version)
+MCP tool names use `__` instead of `.` (e.g. `filesystem__read`,
+`grinder__grind_subnet`). Local (in-process) names use `.`. Same registry.
 
-- [`run.py`](run.py) — first-run installer + launcher
-- [`app_launcher.py`](app_launcher.py) — native desktop window (WebKit/Qt) + in-process API
-- [`app/web/static/`](app/web/static/) — the simple dark-mode chat UI (near-black, one indigo accent)
-- [`app/agent/chatbot_loop.py`](app/agent/chatbot_loop.py) — the agent loop (model ⇄ tools)
-- [`app/runtime/tool_executor.py`](app/runtime/tool_executor.py) — capability map, policy-gated dispatch
-- [`app/tools/bootstrap.py`](app/tools/bootstrap.py) — registers tools with permissive local config
-- [`app/arsenal/`](app/arsenal/) — installed-tool detection + first-class weapon wrappers
-- [`app/mcp/server.py`](app/mcp/server.py) — `meteor-mcp` stdio server (projects the tool core to any AI)
-- [`app/models/registry.py`](app/models/registry.py) — auto-selects the best available engine
-- [`app/models/groq_adapter.py`](app/models/groq_adapter.py) — OpenAI-compatible adapter (Pollinations / Groq / Cerebras / Gemini / OpenRouter / Together)
-- [`app/models/ollama_adapter.py`](app/models/ollama_adapter.py) — local Ollama backend
-- [`config/meteor.yaml`](config/meteor.yaml) — engine profiles
+## Safety gates
 
-Doctrine: [`docs/doctrine.md`](docs/doctrine.md). The runtime is the product;
-model, UI, tools, and storage are all replaceable.
+Full detail in [`docs/mcp-arsenal.md`](docs/mcp-arsenal.md).
+
+| Env var | Effect |
+|---------|--------|
+| `METEOR_MCP_READ_ONLY=1` | Hide mutating / active ops |
+| `METEOR_MCP_ALLOWED_CIDR` | Unlock + scope offensive tools to a subnet |
+| `METEOR_MCP_ALLOWED_ROOT` | Chroot the filesystem tools |
+| `METEOR_MCP_ALLOW_DANGER=1` | Lift the catastrophic-op gate |
+
+Catastrophic actions (recursive rm on `/`, `dd if=/dev/zero of=/dev/sda`, etc.)
+are refused by default because no human is watching the MCP channel. The
+in-app REPL is permissive because you are.
+
+## Personas — KITT and Loop Freak
+
+Meteor ships two operator personas as MCP server instructions and as
+agent files for Cursor / OpenCode / Claude Code:
+
+- **KITT** (*Kinetic Infiltration & Tooling Twin*) — battle-ready co-pilot;
+  parallel reads, sequential offensive ops, error recovery.
+- **Loop Freak** — KITT that doesn't stop early; loops `loopfreak__cycle`
+  until the objective is mapped, a policy wall is hit, or alternates are
+  exhausted.
+
+Cursor: [`agents/kitt.md`](agents/kitt.md), [`agents/loop-freak.md`](agents/loop-freak.md).
+OpenCode: [`.opencode/agents/`](.opencode/agents/).
+
+## Optional — `meteor-chat` REPL
+
+If you want a standalone terminal without mounting the MCP kit into another
+agent, `meteor-chat` runs a local REPL that drives the same tool core with a
+hosted model (keyless Pollinations by default; auto-upgrades to Groq /
+Cerebras / Gemini when `GROQ_API_KEY` / `CEREBRAS_API_KEY` / `GEMINI_API_KEY`
+is set):
+
+```bash
+meteor-chat                          # default KITT
+meteor-chat --persona loop_freak     # Loop Freak
+meteor-chat --one-shot "posture check the local firewall"
+```
+
+This is a **convenience shell**, not the product. The product is the MCP
+kit. See [`docs/terminal-bridge.md`](docs/terminal-bridge.md).
+
+## Architecture
+
+```
+                    ┌──────────────────────────────┐
+                    │   SHARED TOOL CORE            │
+                    │   bootstrap_tools() → registry│
+                    │   ToolExecutor.CAPABILITIES   │  ← 97 caps (single source)
+                    └──────────────┬───────────────┘
+              ┌────────────────────┼────────────────────┐
+              ▼                    ▼                     ▼
+     ┌────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+     │  meteor-mcp    │  │  meteor-chat     │  │  MeteorAgent     │
+     │  (stdio MCP —  │  │  (optional REPL, │  │  (in-process     │
+     │   the product) │  │   KITT/LoopFreak)│  │   API runtime)   │
+     └────────────────┘  └──────────────────┘  └──────────────────┘
+```
+
+| File | Role |
+|------|------|
+| [`app/mcp/server.py`](app/mcp/server.py) | `meteor-mcp` stdio server — the projection |
+| [`app/mcp/policy.py`](app/mcp/policy.py) | env gates for external agents |
+| [`app/mcp/context.py`](app/mcp/context.py) | headless graph / grinder |
+| [`app/runtime/tool_executor.py`](app/runtime/tool_executor.py) | `CAPABILITIES` — single source of truth |
+| [`app/tools/bootstrap.py`](app/tools/bootstrap.py) | registers every tool |
+| [`app/arsenal/`](app/arsenal/) | installed-tool detection + weapon wrappers |
+| [`app/terminal/`](app/terminal/) | `meteor-chat` REPL |
+| [`config/meteor.yaml`](config/meteor.yaml) | (optional) chat profiles — hosted only |
+
+Doctrine: [`docs/doctrine.md`](docs/doctrine.md).
 
 ## Status
 
-Working agentic chat with full tool use, keyless-by-default hosted inference,
-offline Ollama fallback, and a native app bundle for Linux / macOS / Windows.
+Working MCP arsenal, three integrations (Cursor, Claude Code, OpenCode),
+optional REPL, 97 capabilities in one registry.
 
 ## License
 

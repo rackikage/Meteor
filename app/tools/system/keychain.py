@@ -39,8 +39,17 @@ class KeychainManager:
                 subprocess.run(["security", "delete-generic-password", "-s", service, "-a", account], capture_output=True, check=False, timeout=5)
                 subprocess.run(["security", "add-generic-password", "-s", service, "-a", account, "-w", secret], capture_output=True, check=True, timeout=5)
             elif self._platform == "linux" and not self._use_fallback:
-                proc = subprocess.Popen(["secret-tool", "store", f"service={service}", f"account={account}"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                proc.communicate(secret.encode("utf-8"), timeout=5)
+                # secret-tool store requires --label; without it, the process
+                # exits with rc=2 and the secret is never persisted.
+                label = f"{service}/{account}"
+                proc = subprocess.Popen(
+                    ["secret-tool", "store", "--label", label,
+                     "service", service, "account", account],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+                out, err = proc.communicate(secret.encode("utf-8"), timeout=5)
+                if proc.returncode != 0:
+                    raise KeychainError(f"secret-tool store failed: {err.decode(errors='replace').strip()}")
             else:
                 self._store_fallback(service, account, secret)
             logger.info("Stored credential: %s/%s", service, account)
@@ -54,7 +63,10 @@ class KeychainManager:
                 result = subprocess.run(["security", "find-generic-password", "-s", service, "-a", account, "-w"], capture_output=True, text=True, timeout=5)
                 return result.stdout.strip() if result.returncode == 0 else None
             elif self._platform == "linux" and not self._use_fallback:
-                result = subprocess.run(["secret-tool", "lookup", f"service={service}", f"account={account}"], capture_output=True, text=True, timeout=5)
+                result = subprocess.run(
+                    ["secret-tool", "lookup", "service", service, "account", account],
+                    capture_output=True, text=True, timeout=5,
+                )
                 return result.stdout.strip() if result.returncode == 0 else None
             else:
                 return self._retrieve_fallback(service, account)
@@ -67,7 +79,10 @@ class KeychainManager:
             if self._platform == "macos" and not self._use_fallback:
                 subprocess.run(["security", "delete-generic-password", "-s", service, "-a", account], capture_output=True, check=False, timeout=5)
             elif self._platform == "linux" and not self._use_fallback:
-                subprocess.run(["secret-tool", "clear", f"service={service}", f"account={account}"], capture_output=True, check=False, timeout=5)
+                subprocess.run(
+                    ["secret-tool", "clear", "service", service, "account", account],
+                    capture_output=True, check=False, timeout=5,
+                )
             else:
                 self._delete_fallback(service, account)
             return True

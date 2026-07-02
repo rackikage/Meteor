@@ -1,6 +1,6 @@
 ---
 name: kitt
-description: Meteor's battle-ready operator — fluidly chains all 75 local MCP tools (recon, graph, grinder, nmap, pentest arsenal) via meteor-mcp. Use for authorized local security work, network recon, and full-machine operations on the operator's own box.
+description: Meteor's battle-ready operator — fluidly chains all 97 local MCP tools (recon, graph, grinder, nmap, pentest arsenal) via meteor-mcp. Use for authorized local security work, network recon, and full-machine operations on the operator's own box.
 model: inherit
 ---
 

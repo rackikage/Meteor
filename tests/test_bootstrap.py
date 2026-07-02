@@ -46,6 +46,9 @@ def test_bootstrap_uses_supplied_config_base_dir(tmp_path) -> None:
 
 
 def test_bootstrap_warning_if_gguf_missing(tmp_path) -> None:
+    """A missing llama.cpp model_path should surface as a warning and mark the
+    bootstrap not-ready. Hosted backends (Pollinations, Groq, …) use model_path
+    as a remote id and are not filesystem-checked."""
     import yaml
 
     config_dir = tmp_path / "config"
@@ -56,7 +59,18 @@ def test_bootstrap_warning_if_gguf_missing(tmp_path) -> None:
     with open(base_config_path) as f:
         raw = yaml.safe_load(f)
 
-    raw["models"]["profiles"][raw["models"]["default_profile"]]["model_path"] = "nonexistent.gguf"
+    # Force the default onto a llama.cpp profile pointing at a missing gguf.
+    raw["models"]["default_profile"] = "llama3.2-3b-local"
+    raw["models"]["profiles"]["llama3.2-3b-local"] = {
+        "backend": "llama_cpp",
+        "model_path": "nonexistent.gguf",
+        "context_window": 4096,
+        "temperature": 0.7,
+        "temperature_structured": 0.2,
+        "temperature_creative": 0.8,
+        "max_tokens": 512,
+        "wired": True,
+    }
     with open(config_file, "w") as f:
         yaml.dump(raw, f)
 
