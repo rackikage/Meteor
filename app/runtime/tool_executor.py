@@ -145,6 +145,10 @@ class ToolExecutor:
         "web.cves": ("cves", ["service"], "Look up CVEs for a service/banner (NVD)"),
         "web.exploits": ("exploits", ["service"], "Search Exploit-DB for a service/banner"),
         "web.research": ("research", ["ip", "port", "service"], "Full service intel: CVEs + exploits + web hits"),
+        "web.exploit_surface": (
+            "exploit_surface", ["ip", "port", "service"],
+            "CVE + Exploit-DB intel with attack score and recommended next tools (research only, no payloads)",
+        ),
     }
 
     def __init__(self, budget: Optional[SignalBudget] = None) -> None:
@@ -357,6 +361,12 @@ BASE_CAPABILITY_SCHEMAS: dict[str, dict] = {
         {"cidr": {**_STR, "description": "Optional subnet; omit to scan every in-scope host"}}, []),
     "graph.query": _schema(
         {"sql": {**_STR, "description": "Read-only SELECT/WITH query over the asset graph"}}, ["sql"]),
+    "web.exploit_surface": _schema(
+        {"ip": {**_STR, "description": "Target host IP (authorized scope only)"},
+         "port": {"type": "integer", "description": "Service port"},
+         "service": {**_STR, "description": "Service name, e.g. http, ssh"},
+         "banner": {**_STR, "description": "Optional banner string"}},
+        ["ip", "port", "service"]),
 }
 
 CAPABILITY_SCHEMAS: dict[str, dict] = dict(BASE_CAPABILITY_SCHEMAS)

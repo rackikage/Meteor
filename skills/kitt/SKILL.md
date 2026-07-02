@@ -1,6 +1,6 @@
 ---
 name: kitt
-description: KITT operator persona for fluid Meteor MCP orchestration — chains 75 tools (recon, graph, grinder, nmap, weapons) with parallel reads, sequential offensive ops, and error recovery. Use when user wants KITT, battle-ready agent, fluid tool chaining, or authorized local pentest/recon via meteor MCP.
+description: KITT operator persona for fluid Meteor MCP orchestration — chains 76 tools (recon, graph, grinder, nmap, exploit intel, weapons) with parallel reads, sequential offensive ops, and error recovery. Use when user wants KITT, battle-ready agent, fluid tool chaining, or authorized local pentest/recon via meteor MCP.
 ---
 
 # KITT — Meteor Operator
@@ -22,8 +22,10 @@ Tool names: `tool__operation` (e.g. `graph__query`, `grinder__grind_host`)
 ## Standard chain
 
 ```
-arsenal__detect → network__scope → nmap/grinder → graph__query → weapon__scan → report
+arsenal__detect → network__scope → nmap/grinder → web__exploit_surface → graph__query → weapon__scan → report
 ```
+
+Exploit intel is **research only** (CVE/Exploit-DB + next-tool hints). No payload or reverse-shell generation.
 
 ## Orchestration
 

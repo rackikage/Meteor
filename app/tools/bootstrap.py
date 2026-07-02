@@ -145,6 +145,43 @@ class WebIntelTool:
     def research(self, ip: str, port: int, service: str, banner: str = "") -> dict:
         return self._run(self._searcher.research_service(str(ip), int(port), str(service), str(banner)))
 
+    def exploit_surface(self, ip: str, port: int, service: str, banner: str = "") -> dict:
+        """Aggregate CVE + Exploit-DB intel with KITT-friendly next-step hints.
+
+        Research-only — surfaces known vulns and which typed weapons to run next;
+        does not generate or fetch exploit payloads or reverse shells.
+        """
+        intel = self._run(self._searcher.research_service(
+            str(ip), int(port), str(service), str(banner),
+        ))
+        score = intel.get("attack_surface_score", 0.0)
+        cves = intel.get("cves") or []
+        exploits = intel.get("exploits") or []
+        critical = sum(1 for c in cves if str(c.get("severity", "")).upper() in ("CRITICAL", "HIGH"))
+        verified = sum(1 for e in exploits if e.get("verified"))
+        hints: list[str] = []
+        if exploits:
+            hints.append("searchsploit__search with the service term for local PoC references")
+        svc = (service or "").lower()
+        if "http" in svc or port in (80, 443, 8080, 8443):
+            hints.append("nuclei__scan or nikto__scan against the authorized target URL")
+        if "ssh" in svc or port == 22:
+            hints.append("review banner + web__cves; authorized cred tests only via hydra with scope")
+        if score >= 7:
+            hints.append("graph__query vulnerabilities table after grinder discoveries")
+        return {
+            "ip": ip, "port": port, "service": service, "banner": banner,
+            "attack_surface_score": score,
+            "cve_count": len(cves),
+            "critical_or_high_cves": critical,
+            "exploit_match_count": len(exploits),
+            "verified_exploit_matches": verified,
+            "cves": cves[:20],
+            "exploits": exploits[:20],
+            "recommended_next_tools": hints,
+            "note": "Research intel only. Run weapons only on authorized targets within METEOR_MCP_ALLOWED_CIDR.",
+        }
+
     def health(self) -> dict:
         return {"healthy": True, "backend": "web_intel"}
 
