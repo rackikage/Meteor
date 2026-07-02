@@ -294,6 +294,76 @@ ARSENAL_CAPABILITIES: dict[str, tuple] = {
 }
 
 
+# tool.operation -> JSON-Schema fragment {properties, required}. Optional/typed
+# params the (method, required, desc) tuple can't express — surfaced to MCP
+# clients by app/mcp/server.py so agents can pass level/risk/wordlist/etc.
+ARSENAL_SCHEMAS: dict[str, dict] = {
+    "arsenal.detect": {"properties": {
+        "phase": {"type": "string", "description": "Optional phase filter (recon/analyze/exploit/…)"}},
+        "required": []},
+    "arsenal.run": {"properties": {
+        "tool": {"type": "string", "description": "Installed binary name"},
+        "args": {"type": "string", "description": "Raw argument string (shell-split)"},
+        "timeout": {"type": "number", "description": "Seconds before kill (default 600)"}},
+        "required": ["tool"]},
+    "sqlmap.scan": {"properties": {
+        "url": {"type": "string", "description": "Target URL"},
+        "data": {"type": "string", "description": "POST body to test"},
+        "level": {"type": "integer", "description": "Test level 1-5 (default 1)"},
+        "risk": {"type": "integer", "description": "Risk 1-3 (default 1)"},
+        "extra": {"type": "string", "description": "Extra raw sqlmap flags"}},
+        "required": ["url"]},
+    "nuclei.scan": {"properties": {
+        "target": {"type": "string", "description": "Target URL/host"},
+        "templates": {"type": "string", "description": "Template path/tag filter (-t)"},
+        "severity": {"type": "string", "description": "e.g. critical,high"}},
+        "required": ["target"]},
+    "whatweb.fingerprint": {"properties": {
+        "target": {"type": "string"},
+        "aggression": {"type": "integer", "description": "1 stealthy – 4 heavy"}},
+        "required": ["target"]},
+    "wpscan.scan": {"properties": {
+        "url": {"type": "string"},
+        "extra": {"type": "string", "description": "Extra wpscan flags"}},
+        "required": ["url"]},
+    "gobuster.dir": {"properties": {
+        "url": {"type": "string"},
+        "wordlist": {"type": "string"},
+        "extensions": {"type": "string", "description": "e.g. php,html"}},
+        "required": ["url"]},
+    "gobuster.dns": {"properties": {
+        "domain": {"type": "string"}, "wordlist": {"type": "string"}},
+        "required": ["domain"]},
+    "ffuf.fuzz": {"properties": {
+        "url": {"type": "string", "description": "URL with FUZZ keyword"},
+        "wordlist": {"type": "string"}},
+        "required": ["url"]},
+    "feroxbuster.scan": {"properties": {
+        "url": {"type": "string"}, "wordlist": {"type": "string"}},
+        "required": ["url"]},
+    "hydra.bruteforce": {"properties": {
+        "target": {"type": "string"},
+        "service": {"type": "string", "description": "e.g. ssh, ftp, http-post-form"},
+        "username": {"type": "string"},
+        "userlist": {"type": "string"},
+        "passlist": {"type": "string"}},
+        "required": ["target", "service"]},
+    "smbmap.scan": {"properties": {
+        "target": {"type": "string"},
+        "username": {"type": "string"}, "password": {"type": "string"}},
+        "required": ["target"]},
+    "masscan.scan": {"properties": {
+        "target": {"type": "string"},
+        "ports": {"type": "string", "description": "e.g. 1-1000 (default)"},
+        "rate": {"type": "integer", "description": "Packets/sec (default 1000)"}},
+        "required": ["target"]},
+    "binwalk.scan": {"properties": {
+        "path": {"type": "string"},
+        "extract": {"type": "boolean", "description": "Auto-extract (-e)"}},
+        "required": ["path"]},
+}
+
+
 def register_arsenal(registry) -> None:
     """Register every weapon into the shared SystemToolRegistry. Idempotent."""
     for name, instance in WEAPON_TOOLS.items():

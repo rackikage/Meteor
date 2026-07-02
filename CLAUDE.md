@@ -21,7 +21,7 @@ backed by hosted keyless/free models with local Ollama fallback.
 
 ```
 User prompt → web/static/app.js (SSE) → POST /api/v1/agent/chat (agent.py)
-  → AgentChatLoop.run() (chatbot_loop.py)
+  → AgentChatLoop.run() (chatbot_loop.py) — KITT persona via app/agent/kitt.py
     → model.complete() — via ModelRegistry.get_adapter() (registry.py)
       → groq_adapter.py / ollama_adapter.py — OpenAI-compat or local
     → _parse_tool_calls() — JSON object or array [{tool, operation, params}, ...]
@@ -31,8 +31,8 @@ User prompt → web/static/app.js (SSE) → POST /api/v1/agent/chat (agent.py)
 ```
 
 Key files:
-- `chatbot_loop.py` — agent loop, system prompt (`_tool_manual` advertises every
-  capability), tool parsing, 12-iter cap
+- `kitt.py` — KITT persona, grouped tool manual, retry/recovery/plan helpers; MCP instructions
+- `chatbot_loop.py` — streaming tool loop; resilient retries, plan events, parallel fan-out
 - `tool_executor.py` — `CAPABILITIES` dict, 4-gate execution (validate → policy →
   budget → invoke)
 - `app/tools/bootstrap.py` — `bootstrap_tools()` registers every tool permissively
@@ -44,20 +44,26 @@ Key files:
 - `raw_scanner.py` — stateless SYN scanner (root required)
 - `web_search.py` — DuckDuckGo/NVD/Exploit-DB searcher, wrapped by `WebIntelTool`
   in `bootstrap.py` and exposed as `web.search/cves/exploits/research`
-- `grinder.py` — autonomous infiltration engine (NOT wired into the agent loop)
+- `grinder.py` — autonomous infiltration engine, exposed as `grinder.*` caps via `GrinderTool`
 - `config/meteor.yaml` — model profiles (default `pollinations-free`, keyless)
 - `run.py` — launcher: uvicorn on :8765
+- `app/mcp/server.py` — `meteor-mcp` stdio server (thin projection of `CAPABILITIES`)
+- `app/mcp/policy.py` — MCP-only env-scoped gates (read-only / CIDR / root / profile)
+- `app/runtime/asset_context.py` + `app/mcp/context.py` — headless graph/grinder for MCP (no FastAPI)
 
 ## Known gaps / backlog
 - **Model failover** — `registry.py:get_adapter()` picks one profile; no
   cross-backend Pollinations → Groq → Cerebras → Ollama chain yet (Groq retries
   internally only).
-- **`grinder.py` not wired** — full AssetGraph → Grinder → Scanner → EventBus
-  pipeline exists but is not exposed to the agent loop or CAPABILITIES.
-- **No diff-based file editing** — only `filesystem.write` (whole-file rewrite);
-  no `filesystem.edit {path, old_string, new_string}`.
 - **No iterative code-execution loop** — one-shot shell only.
 - **Context window** — long tool chains exceed free-model 8K contexts; old tool
   results should be summarized/compressed.
 - **Persistence** — session history is in-memory (`_SESSIONS` in `agent.py`);
   dies on restart.
+
+## MCP suite + KITT (done)
+- **Phase 1** — Cursor kit: plugin, skills, agents/kitt.md, mcp.json, setup scripts
+- **P0** — grinder + asset graph wired (**75** caps); headless via asset_context
+- **P1** — MCP policy (read-only, CIDR, root, profile, offensive-gated default)
+- **P2** — rich MCP JSON schemas (CAPABILITY_SCHEMAS, ARSENAL_SCHEMAS)
+- **KITT** — battle-ready operator persona in-app + MCP instructions + Cursor agent

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "meteor": {
+      "command": "${workspaceFolder}/.venv/bin/meteor-mcp",
+      "env": {
+        "METEOR_LOG_LEVEL": "WARNING"
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "meteor": {
+      "command": "bash",
+      "args": ["${CURSOR_PLUGIN_ROOT}/scripts/run-meteor-mcp.sh"],
+      "env": {
+        "METEOR_LOG_LEVEL": "WARNING"
+      }
+    }
+  }
+}

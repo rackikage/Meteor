@@ -134,6 +134,13 @@ class ToolExecutor:
         "pentest.probe": ("probe", ["target"], "Async TCP probe engine"),
         "pentest.posture": ("posture", [], "Combined kernel + graph firewall posture"),
         "network.scope": ("scope", [], "Discover local gateway, CIDR, and priority targets"),
+        "grinder.grind_host": ("grind_host", ["target"], "Autonomous deep scan of one host into the asset graph"),
+        "grinder.grind_subnet": ("grind_subnet", ["cidr"], "Autonomous scan of a whole subnet into the graph (scan=common|subset|sweep)"),
+        "grinder.grind_sector": ("grind_sector", [], "Scan every in-scope host known to the asset graph"),
+        "graph.schema": ("schema", [], "Asset graph schema reference (tables + columns)"),
+        "graph.tables": ("tables", [], "List asset graph tables"),
+        "graph.counts": ("counts", [], "Row counts per asset graph table"),
+        "graph.query": ("query", ["sql"], "Run a read-only SELECT/WITH query over the asset graph"),
         "web.search": ("search", ["query"], "General web search (DuckDuckGo)"),
         "web.cves": ("cves", ["service"], "Look up CVEs for a service/banner (NVD)"),
         "web.exploits": ("exploits", ["service"], "Search Exploit-DB for a service/banner"),
@@ -300,3 +307,61 @@ try:
     ToolExecutor.CAPABILITIES.update(ARSENAL_CAPABILITIES)
 except Exception as _exc:  # noqa: BLE001 — arsenal is optional
     logger.warning("Arsenal capabilities not loaded: %s", _exc)
+
+
+# ── Rich JSON schemas for MCP (optional/typed params) ───────────────────────
+# The (method, required_params, desc) tuples above only express required string
+# params. CAPABILITY_SCHEMAS carries the fuller JSON-Schema for tools that have
+# optional or non-string params; app/mcp/server.py emits it in list_tools().
+# Tools without an entry fall back to all-required-strings. Keyed tool.operation.
+_STR = {"type": "string"}
+
+
+def _schema(properties: dict, required: list) -> dict:
+    return {"properties": properties, "required": required}
+
+
+BASE_CAPABILITY_SCHEMAS: dict[str, dict] = {
+    "filesystem.edit": _schema(
+        {"path": {**_STR, "description": "File to edit"},
+         "old_string": {**_STR, "description": "Exact text to replace"},
+         "new_string": {**_STR, "description": "Replacement text"},
+         "replace_all": {"type": "boolean", "description": "Replace every occurrence (default false)"}},
+        ["path", "old_string", "new_string"]),
+    "filesystem.read_range": _schema(
+        {"path": _STR,
+         "start_line": {"type": "integer", "description": "1-based start line"},
+         "end_line": {"type": "integer", "description": "1-based end line (inclusive)"}},
+        ["path", "start_line", "end_line"]),
+    "process.kill": _schema(
+        {"pid": {"type": "integer", "description": "Process id to terminate"}}, ["pid"]),
+    "nmap.scan": _schema(
+        {"target": {**_STR, "description": "IP, host, or CIDR"},
+         "ports": {**_STR, "description": "Port spec '22,80' or '1-1000' (default top 1000)"}},
+        ["target"]),
+    "nmap.service_version": _schema(
+        {"target": _STR, "ports": {**_STR, "description": "Port spec (default 1-1000)"}}, ["target"]),
+    "nmap.script": _schema(
+        {"target": _STR,
+         "script": {**_STR, "description": "NSE script name, e.g. 'vuln' or 'default'"},
+         "ports": {**_STR, "description": "Port spec (default 1-1000)"}},
+        ["target", "script"]),
+    "grinder.grind_host": _schema(
+        {"target": {**_STR, "description": "Single host IP to deep-scan"}}, ["target"]),
+    "grinder.grind_subnet": _schema(
+        {"cidr": {**_STR, "description": "Subnet CIDR, e.g. 10.0.0.0/24"},
+         "scan": {"type": "string", "enum": ["common", "subset", "sweep"],
+                  "description": "Port-set breadth (default common)"}},
+        ["cidr"]),
+    "grinder.grind_sector": _schema(
+        {"cidr": {**_STR, "description": "Optional subnet; omit to scan every in-scope host"}}, []),
+    "graph.query": _schema(
+        {"sql": {**_STR, "description": "Read-only SELECT/WITH query over the asset graph"}}, ["sql"]),
+}
+
+CAPABILITY_SCHEMAS: dict[str, dict] = dict(BASE_CAPABILITY_SCHEMAS)
+try:
+    from app.arsenal.weapons import ARSENAL_SCHEMAS
+    CAPABILITY_SCHEMAS.update(ARSENAL_SCHEMAS)
+except Exception as _exc:  # noqa: BLE001 — arsenal is optional
+    logger.warning("Arsenal schemas not loaded: %s", _exc)

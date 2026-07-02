@@ -288,7 +288,9 @@ function handleEvent(evt, bubble, setFinal) {
       break;
     }
     case "final_start":
-      if (bubble.textContent === "…") bubble.textContent = "";
+      // The real answer is about to stream — drop any transient working hint
+      // (the "…" spinner or KITT's plan line) so it doesn't prefix the reply.
+      bubble.textContent = "";
       break;
     case "confirm_required":
       // Serious, irreversible action — pause and ask before it runs.
@@ -303,6 +305,20 @@ function handleEvent(evt, bubble, setFinal) {
       if (event === "tool_call" && !bubble.textContent) {
         bubble.textContent = "…";
       }
+      break;
+    case "plan": {
+      // KITT narrates its multi-step plan while it works; the final answer
+      // (final_start) replaces this transient hint.
+      const steps = payload.steps || [];
+      if (steps.length) {
+        bubble.textContent = "Plan: " + steps.join(" → ");
+        scrollBottom();
+      }
+      break;
+    }
+    case "tool_retry":
+      // Transient blip — keep the subtle working hint if nothing else is shown.
+      if (!bubble.textContent) bubble.textContent = "…";
       break;
     case "final":
     case "final_done": {

@@ -80,4 +80,15 @@ def classify_danger(tool: str, operation: str, params: dict) -> Optional[str]:
             return "kill PID 1 / all processes"
         return None
 
+    # arsenal.run executes an arbitrary installed binary with a raw arg string.
+    # Reconstruct the effective command line and run it through the same shell
+    # danger patterns so `arsenal.run(tool="rm", args="-rf /")` is caught exactly
+    # like `shell.run("rm -rf /")`.
+    if tool == "arsenal" and operation == "run":
+        cmd = f"{params.get('tool', '')} {params.get('args', '')}".strip()
+        for pattern, reason in _SHELL_DANGER:
+            if pattern.search(cmd):
+                return reason
+        return None
+
     return None

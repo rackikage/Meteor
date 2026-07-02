@@ -28,6 +28,7 @@ from app.dispatcher.noise import NoiseFloorSampler
 from app.evidence.tracker import EvidenceTracker
 from app.graph.event_bus import AssetEventBus
 from app.graph.sqlite_graph import SQLiteAssetGraph
+from app.graph.subscribers import wire_graph_subscribers
 from app.graph.tools import GraphQueryTool
 from app.memory.sqlite_adapter import build_sqlite_memory_adapter
 from app.memory.triggers import install_memory_triggers
@@ -35,6 +36,7 @@ from app.models.registry import build_model_registry
 from app.observability.sqlite_adapter import build_sqlite_observability_adapter
 from app.policy.sql_engine import build_sql_policy_engine
 from app.retrieval.sqlite_adapter import build_sqlite_retrieval_adapter
+from app.runtime.asset_context import set_asset_context
 from app.runtime.context_builder import ContextBuilder
 from app.runtime.orchestrator import MeteorOrchestrator, OrchestratorRequest
 from app.runtime.tool_executor import ToolExecutor
@@ -102,6 +104,11 @@ class MeteorRuntime:
 
         self.graph_tool = GraphQueryTool(self.graph)
 
+        # Register this runtime as the process-wide asset context so pentest /
+        # grinder / graph tools resolve their deps here instead of building a
+        # second headless graph (see app/runtime/asset_context.py).
+        set_asset_context(self)
+
         # ── Strategy engine (Ollama meta-learning) ─────────────────
         self.strategy = StrategyEngine(
             model=self.config.models.profiles.get(
@@ -165,57 +172,7 @@ class MeteorRuntime:
 
     def _wire_graph_subscribers(self) -> None:
         """Wire event bus topics to auto-persist into the asset graph."""
-
-        def _on_host(payload: dict) -> None:
-            subnet_id = payload.get("subnet_id")
-            self.graph.upsert_host(
-                ip=payload["ip"],
-                hostname=payload.get("hostname"),
-                os=payload.get("os"),
-                subnet_id=subnet_id,
-                source=payload.get("source", "discovery"),
-            )
-
-        def _on_service(payload: dict) -> None:
-            host_id = payload.get("host_id")
-            if not host_id:
-                host_id = self.graph.upsert_host(ip=payload["ip"])
-            svc_id = self.graph.upsert_service(
-                host_id=host_id,
-                port=payload["port"],
-                name=payload.get("name", "unknown"),
-                banner=payload.get("banner", ""),
-            )
-            self.graph.add_edge("host", host_id, "service", svc_id, "RUNS_SERVICE")
-
-        def _on_vuln(payload: dict) -> None:
-            svc_id = payload["service_id"]
-            self.graph.upsert_vulnerability(
-                service_id=svc_id,
-                cve_id=payload["cve_id"],
-                severity=payload.get("severity"),
-                exploit_available=payload.get("exploit_available", False),
-            )
-            self.graph.add_edge("service", svc_id, "vulnerability", 0,
-                                "HAS_VULNERABILITY")
-
-        def _on_cred(payload: dict) -> None:
-            host_id = payload.get("host_id")
-            cred_id = self.graph.upsert_credential(
-                host_id=host_id,
-                username=payload["username"],
-                secret_type=payload["secret_type"],
-                secret_value=payload.get("secret_value", ""),
-                source=payload.get("source", "discovery"),
-            )
-            if host_id:
-                self.graph.add_edge("host", host_id, "credential", cred_id,
-                                    "CONTAINS_CREDENTIAL")
-
-        self.event_bus.subscribe("host.discovered", _on_host)
-        self.event_bus.subscribe("service.discovered", _on_service)
-        self.event_bus.subscribe("vulnerability.matched", _on_vuln)
-        self.event_bus.subscribe("credential.found", _on_cred)
+        wire_graph_subscribers(self.graph, self.event_bus)
 
     def handle_chat(
         self,

@@ -35,6 +35,26 @@ def _split_name(name: str) -> tuple[str, str]:
     return tool, operation
 
 
+def _input_schema(tool_op: str, required_params: list) -> dict:
+    """Build a JSON Schema for an MCP tool. Uses the rich CAPABILITY_SCHEMAS
+    entry when present (typed + optional params, closed object), otherwise falls
+    back to the permissive all-required-strings shape."""
+    from app.runtime.tool_executor import CAPABILITY_SCHEMAS
+    spec = CAPABILITY_SCHEMAS.get(tool_op)
+    if spec is None:
+        return {
+            "type": "object",
+            "properties": {p: {"type": "string"} for p in required_params},
+            "required": list(required_params),
+        }
+    return {
+        "type": "object",
+        "properties": dict(spec["properties"]),
+        "required": list(spec.get("required", required_params)),
+        "additionalProperties": False,
+    }
+
+
 def build_server():
     """Bootstrap the tools and return a configured MCP Server."""
     from mcp.server import Server
@@ -43,23 +63,44 @@ def build_server():
     from app.tools.bootstrap import bootstrap_tools
     from app.runtime.tool_executor import ToolExecutor
     from app.runtime.danger import classify_danger
+    from app.mcp.policy import McpPolicy
+    from app.agent.kitt import build_mcp_instructions
 
     bootstrap_tools()  # register every tool (incl. arsenal) into the registry
-    executor = ToolExecutor()
-    allow_danger = os.environ.get("METEOR_MCP_ALLOW_DANGER", "").lower() in ("1", "true", "yes")
+    policy = McpPolicy.from_env()
 
-    server = Server("meteor")
+    # METEOR_MCP_ALLOWED_ROOT — re-register the filesystem tool chrooted to a
+    # single directory for THIS MCP process only (the desktop app stays at "/").
+    if policy.allowed_root:
+        from app.tools.system.filesystem import FilesystemAgent
+        from app.tools.system.registry import get_registry
+        get_registry().register(
+            "filesystem",
+            FilesystemAgent(allowed_dirs=[policy.allowed_root],
+                            max_file_size=1 * 1024 * 1024 * 1024),
+            f"Filesystem (MCP-scoped to {policy.allowed_root})", version="1.0",
+        )
+
+    executor = ToolExecutor()
+
+    visible = sum(1 for tool_op in ToolExecutor.CAPABILITIES
+                  if policy.is_visible(*tool_op.split(".", 1)))
+    server = Server(
+        "meteor",
+        instructions=build_mcp_instructions(executor, visible_count=visible),
+    )
 
     @server.list_tools()
     async def list_tools() -> list["types.Tool"]:
         tools = []
         for tool_op, (_, params, desc) in sorted(ToolExecutor.CAPABILITIES.items()):
-            schema = {
-                "type": "object",
-                "properties": {p: {"type": "string"} for p in params},
-                "required": list(params),
-            }
-            tools.append(types.Tool(name=_mcp_name(tool_op), description=desc, inputSchema=schema))
+            tool, operation = tool_op.split(".", 1)
+            if not policy.is_visible(tool, operation):
+                continue
+            tools.append(types.Tool(
+                name=_mcp_name(tool_op), description=desc,
+                inputSchema=_input_schema(tool_op, params),
+            ))
         return tools
 
     @server.call_tool()
@@ -70,20 +111,31 @@ def build_server():
         tool, operation = _split_name(name)
         params = arguments or {}
 
-        reason = classify_danger(tool, operation, params)
-        if reason and not allow_danger:
+        def _guarded():
+            reason = classify_danger(tool, operation, params)
+            if reason and not policy.allow_danger:
+                return ("danger", reason)
+            gate = policy.gate(tool, operation, params)
+            if gate:
+                return ("gate", gate)
+            return ("ok", executor.execute(tool=tool, operation=operation,
+                                           params=params, session_id="mcp"))
+
+        # Run the guards + (synchronous, sometimes slow) execution off the event
+        # loop so DNS scope-checks and concurrent calls never block each other.
+        kind, value = await anyio.to_thread.run_sync(_guarded)
+
+        if kind == "danger":
             return [types.TextContent(
                 type="text",
                 text=(f"REFUSED: '{tool}.{operation}' is a guarded catastrophic action "
-                      f"({reason}). There is no human on this MCP channel to confirm it. "
+                      f"({value}). There is no human on this MCP channel to confirm it. "
                       f"Set METEOR_MCP_ALLOW_DANGER=1 to permit unattended execution."),
             )]
+        if kind == "gate":
+            return [types.TextContent(type="text", text=f"REFUSED: {value}")]
 
-        # ToolExecutor.execute is synchronous and some tools are slow — run off
-        # the event loop so concurrent MCP calls don't block each other.
-        result = await anyio.to_thread.run_sync(
-            lambda: executor.execute(tool=tool, operation=operation, params=params, session_id="mcp")
-        )
+        result = value
         payload = {
             "status": result.status.value,
             "tool": f"{tool}.{operation}",

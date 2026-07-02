@@ -70,34 +70,34 @@ class PentestTool:
         return get_pentest_executor().execute("kernel_posture").to_dict()
 
     def firewall_analyze(self, cidr: str = "", gateway: str = "") -> dict:
-        from app.api.main import get_runtime
+        from app.runtime.asset_context import get_asset_context
         from app.tools.pentest.tool_executor import get_pentest_executor
-        rt = get_runtime()
+        ctx = get_asset_context()
         return get_pentest_executor().execute(
             "firewall_analyze",
-            graph_tool=rt.graph_tool,
+            graph_tool=ctx.graph_tool,
             gateway=gateway or None,
             cidr=cidr or None,
         ).to_dict()
 
     def probe(self, target: str, ports: Optional[list[int]] = None) -> dict:
-        from app.api.main import get_runtime
+        from app.runtime.asset_context import get_asset_context
         from app.tools.pentest.tool_executor import get_pentest_executor
-        rt = get_runtime()
+        ctx = get_asset_context()
         return get_pentest_executor().execute(
             "probe",
             target=target,
             ports=ports,
-            event_bus=rt.event_bus,
+            event_bus=ctx.event_bus,
         ).to_dict()
 
     def posture(self, cidr: str = "", gateway: str = "") -> dict:
-        from app.api.main import get_runtime
+        from app.runtime.asset_context import get_asset_context
         from app.tools.pentest.tool_executor import get_pentest_executor
-        rt = get_runtime()
+        ctx = get_asset_context()
         return get_pentest_executor().execute(
             "posture",
-            graph_tool=rt.graph_tool,
+            graph_tool=ctx.graph_tool,
             gateway=gateway or None,
             cidr=cidr or None,
         ).to_dict()
@@ -166,6 +166,64 @@ class NetworkScopeTool:
         return {"healthy": True, "backend": "network_scope"}
 
 
+class GrinderTool:
+    """Autonomous network exploration — sync wrappers over InfiltrationGrinder.
+
+    Discoveries persist to the asset graph via the event bus, so a follow-up
+    `graph.query` sees whatever the grind turned up. Resolves the grinder from
+    the shared asset context, so it runs headless under meteor-mcp too."""
+
+    @staticmethod
+    def _grinder():
+        from app.runtime.asset_context import get_asset_context
+        return get_asset_context().grinder
+
+    @staticmethod
+    def _run(coro) -> dict:
+        import asyncio
+        from dataclasses import asdict
+        return asdict(asyncio.run(coro))
+
+    def grind_host(self, target: str) -> dict:
+        return self._run(self._grinder().grind_host(str(target)))
+
+    def grind_subnet(self, cidr: str, scan: str = "common") -> dict:
+        return self._run(self._grinder().grind_subnet(str(cidr), scan=str(scan)))
+
+    def grind_sector(self, cidr: str = "") -> dict:
+        return self._run(self._grinder().grind_sector(cidr=str(cidr) or None))
+
+    def health(self) -> dict:
+        return {"healthy": True, "backend": "grinder"}
+
+
+class GraphTool:
+    """Asset-graph introspection and read-only SQL over grinder discoveries.
+
+    Resolves GraphQueryTool from the shared asset context (headless under MCP)."""
+
+    @staticmethod
+    def _tool():
+        from app.runtime.asset_context import get_asset_context
+        return get_asset_context().graph_tool
+
+    def schema(self) -> str:
+        return self._tool().schema()
+
+    def tables(self) -> list:
+        return self._tool().tables()
+
+    def counts(self) -> dict:
+        return self._tool().stats()
+
+    def query(self, sql: str) -> dict:
+        from dataclasses import asdict
+        return asdict(self._tool().query(str(sql)))
+
+    def health(self) -> dict:
+        return {"healthy": True, "backend": "graph"}
+
+
 # ── Bootstrap ────────────────────────────────────────────────────────────
 
 def bootstrap_tools(storage: Any = None) -> SystemToolRegistry:
@@ -225,6 +283,8 @@ def bootstrap_tools(storage: Any = None) -> SystemToolRegistry:
     registry.register("nmap", NmapTool(), "Nmap TCP/host discovery/service/NSE", version="1.0")
     registry.register("pentest", PentestTool(), "Kernel/firewall posture and probe engine", version="1.0")
     registry.register("network", NetworkScopeTool(), "Local network scope (gateway/CIDR)", version="1.0")
+    registry.register("grinder", GrinderTool(), "Autonomous host/subnet/sector grinding into the asset graph", version="1.0")
+    registry.register("graph", GraphTool(), "Asset graph schema/tables/counts + read-only SQL", version="1.0")
     try:
         registry.register("web", WebIntelTool(), "Live web intel — CVE/NVD, Exploit-DB, web search", version="1.0")
     except Exception as exc:

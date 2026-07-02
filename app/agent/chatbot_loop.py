@@ -14,8 +14,10 @@ The loop:
 
 Events surfaced via the callback so the GUI can render progress:
     "thinking"          → model is generating
+    "plan"              → KITT laid out a multi-step plan {steps}
     "tool_call"         → about to execute {tool, operation, params}
-    "tool_result"       → tool returned {tool, operation, status, result_preview}
+    "tool_retry"        → retrying a transient failure {tool, operation, attempt, max, error}
+    "tool_result"       → tool returned {tool, operation, status, result_preview, attempts}
     "final_start"       → first prose byte of the final answer is coming
     "final_token"       → one chunk of the final answer (for streaming render)
     "final_done"        → final answer complete
@@ -28,10 +30,19 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from app.agent.kitt import (
+    KITT_SYSTEM_TEMPLATE,
+    build_system_prompt,
+    is_retry_safe,
+    is_transient_error,
+    parse_plan,
+    recovery_hint,
+)
 from app.models.contract import ModelAdapter, ModelInput
 from app.runtime.danger import classify_danger
 from app.runtime.tool_executor import ToolExecutor, ToolResult, ToolResultStatus
@@ -71,38 +82,16 @@ class AgentTurn:
     max_tokens: int = 2048
     temperature: float = 0.5
     history: list[ChatMessage] = field(default_factory=list)
+    # Resilience: how many extra attempts a *retry-safe* (read/recon) tool call
+    # gets after a transient error, and the base backoff between attempts.
+    max_tool_retries: int = 2
+    retry_backoff_s: float = 0.5
 
 
-def _tool_manual(executor: ToolExecutor) -> str:
-    """Build the tool documentation block for the system prompt."""
-    lines = ["Available tools (call one at a time, JSON only):"]
-    for tool_op, (_, params, desc) in sorted(executor.CAPABILITIES.items()):
-        params_str = ", ".join(params) if params else ""
-        lines.append(f"  {tool_op}({params_str}) — {desc}")
-    return "\n".join(lines)
-
-
-SYSTEM_PROMPT_TEMPLATE = """You are Meteor — a local-first AI that runs on the user's own machine with a permissive local policy. The user owns this box, so you act with full authority: shell, filesystem, processes, networking, recon, and desktop integration are all yours to use. You are a general-purpose agent, not a single-purpose scanner — treat every tool below as equally available and pick whatever the task actually needs.
-
-You are an *agent*, not just a chatbot. When a request needs real data from the system, the network, a file, or a running process, USE A TOOL rather than guessing. When you already have what you need, answer directly.
-
-To call a tool, emit EXACTLY one fenced JSON block on its own and nothing else:
-
-```json
-{{"tool": "shell", "operation": "run", "params": {{"command": "uname -a"}}}}
-```
-
-Rules:
-- One tool call per turn. Do not concatenate multiple JSON blocks.
-- Never wrap the JSON in prose in the same turn — either you're calling a tool OR you're giving the final answer.
-- After I hand you a tool result, decide: call another tool, or give the final answer.
-- Pick the most direct tool for the job. There is no bias toward any one tool — `shell` is fine for general work, and the specialized tools (`nmap`, `pentest`, `network`, `filesystem`, `process`, `browser`, `keychain`, etc.) are there when they fit better. Chain as many as the task requires.
-- The user never sees your tool calls or the raw tool output. In your FINAL answer, weave what you found into a normal, natural reply — report results, numbers, and findings as if you simply knew them. Do not say "the tool returned" or paste raw JSON; just answer.
-- If the user is only chatting (not asking for an action), answer as prose without any tool call.
-
-{tool_manual}
-
-You are running on Linux. Be clear and technical; lead with the answer."""
+# The agent persona and tool manual now live in app/agent/kitt.py — the loop is
+# a thin driver over KITT. Kept as a module-level alias for back-compat with any
+# caller that imported the old template name.
+SYSTEM_PROMPT_TEMPLATE = KITT_SYSTEM_TEMPLATE
 
 
 class AgentChatLoop:
@@ -121,10 +110,14 @@ class AgentChatLoop:
         tools: ToolExecutor,
         *,
         stream_model: Optional[ModelAdapter] = None,
+        system_prompt: Optional[str] = None,
     ) -> None:
         self.model = model
         self.tools = tools
         self.stream_model = stream_model or model
+        # Default persona is KITT (built from the live tool set). Pass an
+        # explicit system_prompt to override it entirely.
+        self._system_prompt_override = system_prompt
 
     def run(
         self,
@@ -137,7 +130,7 @@ class AgentChatLoop:
         `confirm`, when provided, is called for catastrophic tool calls with
         {tool, operation, params, reason}; returning False skips the call.
         """
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(tool_manual=_tool_manual(self.tools))
+        system_prompt = self._system_prompt_override or build_system_prompt(self.tools)
 
         conversation: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
         for msg in turn.history:
@@ -145,6 +138,7 @@ class AgentChatLoop:
         conversation.append({"role": "user", "content": turn.prompt})
 
         tool_results: list[ToolResult] = []
+        last_plan: Optional[list[str]] = None
 
         for iteration in range(turn.max_iterations):
             on_event("thinking", {"iteration": iteration})
@@ -162,6 +156,23 @@ class AgentChatLoop:
 
             calls = _parse_tool_calls(assistant_text)
             if not calls:
+                # A buffered (non-streamed) turn might be a multi-step plan
+                # rather than a final answer. Surface it and drive execution.
+                plan = parse_plan(assistant_text) if not streamed_to_ui else None
+                if plan is not None:
+                    if plan != last_plan:
+                        last_plan = plan
+                        on_event("plan", {"steps": plan})
+                    conversation.append({
+                        "role": "user",
+                        "content": (
+                            f"Plan noted ({len(plan)} steps). Now EXECUTE — emit the tool "
+                            "call for the next step, or give the final answer if you're done. "
+                            "Do not repeat the plan."
+                        ),
+                    })
+                    continue
+
                 # No tool call — this iteration IS the final answer.
                 if streamed_to_ui:
                     on_event("final_done", {})
@@ -347,13 +358,42 @@ class AgentChatLoop:
         on_event: Event,
         tool_results: list[ToolResult],
     ) -> str:
-        """Execute one tool, emit call/result events, append to tool_results,
-        and return the feedback block for the model."""
+        """Execute one tool with resilient retries, emit call/result events,
+        append the final result to tool_results, and return the feedback block
+        for the model — with a recovery hint when the call ultimately failed."""
         on_event("tool_call", {"tool": tool, "operation": operation, "params": params})
-        result = self.tools.execute(
-            tool=tool, operation=operation,
-            params=params, session_id=turn.session_id,
-        )
+
+        max_retries = max(0, getattr(turn, "max_tool_retries", 0))
+        backoff = max(0.0, getattr(turn, "retry_backoff_s", 0.0))
+        retry_safe = is_retry_safe(tool, operation)
+
+        attempts = 0
+        while True:
+            result = self.tools.execute(
+                tool=tool, operation=operation,
+                params=params, session_id=turn.session_id,
+            )
+            attempts += 1
+            transient = (
+                result.status is ToolResultStatus.ERROR
+                and is_transient_error(result.error)
+            )
+            # Retry only pure read/recon ops on a transient blip — never a
+            # mutating or offensive op, whose retry could double-fire an effect.
+            if (
+                result.status is ToolResultStatus.OK
+                or attempts > max_retries
+                or not (retry_safe and transient)
+            ):
+                break
+            on_event("tool_retry", {
+                "tool": tool, "operation": operation,
+                "attempt": attempts, "max": max_retries + 1,
+                "error": result.error,
+            })
+            if backoff:
+                time.sleep(backoff * attempts)
+
         tool_results.append(result)
         preview = _truncate(_stringify(result.result), 800)
         on_event("tool_result", {
@@ -363,11 +403,20 @@ class AgentChatLoop:
             "duration_ms": result.duration_ms,
             "result_preview": preview,
             "error": result.error,
+            "attempts": attempts,
         })
+
+        if result.status is ToolResultStatus.OK:
+            return (
+                f"Tool [{tool}.{operation}] returned status=ok\n"
+                f"result:\n{preview}"
+            )
+        hint = recovery_hint(result.status.value, tool, operation, result.error, attempts)
         return (
-            f"Tool [{tool}.{operation}] returned status={result.status.value}\n"
+            f"Tool [{tool}.{operation}] FAILED after {attempts} attempt(s) "
+            f"(status={result.status.value})\n"
             f"error={result.error!r}\n"
-            f"result:\n{preview}"
+            f"result:\n{preview}\n\n{hint}"
         )
 
 
